@@ -1,44 +1,170 @@
-This is FNA3D, the 3D graphics library for FNA.
+# FNA3D (hlsl branch)
 
-Project Website: https://fna-xna.github.io/
+3D 图形库，为 [FNA](https://fna-xna.github.io/) 提供 Graphics 命名空间实现。
 
-License
--------
-FNA3D is released under the zlib license. See LICENSE for details.
+这是 **hlsl 分支**，与 upstream master 有重大差异，详见下文。
 
-About FNA3D
------------
-FNA3D was written to be used for FNA's Graphics namespace. It carries the same
-API design as XNA 4.0, with various implementations available at runtime
-(including SDL_GPU, OpenGL, and Direct3D). For shaders, we support Direct3D 9
-Effect Framework binaries via MojoShader.
+## 与 upstream master 的区别
 
-Note that while FNA is the main consumer of FNA3D, we do NOT provide separate C#
-bindings. If you want to use FNA3D in C#, simply use FNA instead; it's the same
-API and can be used entirely by itself without dragging in other dependencies.
+| | master (upstream) | hlsl (此分支) |
+|---|---|---|
+| 渲染后端 | OpenGL / D3D11 / SDL_GPU | **仅 SDL_GPU** |
+| Shader 格式 | .fxb (MojoShader) | **.feb (FNA3D Effect Binary)** |
+| Shader 编译 | fxc / MojoShader | **DXC → SPIR-V** |
+| 运行时 Shader 转换 | 无 | **SDL_shadercross** (SPIR-V → DXBC/DXIL/MSL) |
+| 平台项目 | visualc/, visualc-gdk/, Xcode/ | **全部移除** |
 
-Dependencies
-------------
-FNA3D depends solely on SDL 3.2.0 or newer.
-FNA3D never explicitly uses the C runtime.
+## Shader 管线
 
-Building FNA3D
----------------
-For *nix platforms, use CMake:
+```
+HLSL 源码 (.hlsl)
+  → DXC -spirv -T vs_6_0 / ps_6_0
+    → SPIR-V 二进制
+      → FEB Builder 打包
+        → .feb 文件（FNA3D Effect Binary）
+          → FNA3D_CreateEffect() 加载
+            → SDL_shadercross 跨编译为平台原生格式
+              → SDL_GPU 创建 Shader → Pipeline → 绘制
+```
 
-    $ mkdir build/
-    $ cd build/
-    $ cmake ../
-    $ make
+### FEB 二进制格式
 
-For Windows, see the 'visualc/' directory.
+FEB (FNA3D Effect Binary) 是自定义 shader 打包格式，magic number `0x42414E46` ("FNAB")，version 1。
 
-For Xbox GDK, see the 'visualc-gdk/' directory.
+**二进制布局**（所有整数为 little-endian）：
 
-For iOS/tvOS and macOS universal binaries, see the 'Xcode/' directory.
+```
+Header (64 字节 = 16 × uint32):
+  [ 0] magic            0x42414E46 ("FNAB")
+  [ 1] version          1
+  [ 2] techniqueCount
+  [ 3] passCount
+  [ 4] paramCount
+  [ 5] shaderCount
+  [ 6] stringTableSize
+  [ 7] paramOffset
+  [ 8] techniqueOffset
+  [ 9] passOffset
+  [10] shaderOffset
+  [11] spirvOffset
+  [12] totalSize        （必须等于文件实际大小）
+  [13-15] reserved (0)
 
-Found an issue?
----------------
-Issues and patches can be reported via GitHub:
+String Table:   null-terminated 字符串，追加在 header 之后
+Parameters:     每个参数 84+ 字节（nameOff + semOff + type + regIdx + defaultValue(64B) + annotations）
+Techniques:     每个 16 字节（nameOff + passStart + passCount + annotationCount）
+Passes:         每个 24 字节（nameOff + vsIdx + psIdx + renderStateCount + samplerStateCount + reserved）
+Shaders:        每个 24 字节（stage + entryOff + spirvOff + spirvSize + reserved × 2）
+SPIR-V Data:    原始 SPIR-V 二进制
+```
+
+**关键注意**：
+- Shader 条目 stride 为 24 字节（不是 20），与 `FNA3D_LoadEffect()` 解析器一致
+- `totalSize` 必须等于文件大小，否则解析器报 "Truncated file"
+- 参数条目 stride 有已知问题（见"已知限制"），建议 `paramCount = 0`
+
+详见 `src/FNA3D_Effect.h` 和 `src/FNA3D_Effect.c` 中的解析器实现。
+
+### 构建 FEB 文件
+
+使用 [FNA3D_HLSL_Test](../FNA3D_HLSL_Test/) 中的 `tools/feb_builder.py`：
+
+```bash
+python3 tools/feb_builder.py manifest.feb.json
+```
+
+Manifest 格式（`.feb.json`）及着色器编写约定详见[测试项目 README](../FNA3D_HLSL_Test/README.md)。
+
+## 依赖
+
+- **运行时**：SDL 3.2.0+（唯一依赖）。SDL_GPU 需要系统有 Vulkan / D3D12 / Metal 驱动，否则设备创建失败。
+- **构建时**：DXC（DirectX Shader Compiler），仅用于内容管线将 HLSL 编译为 SPIR-V。FNA3D 本身不依赖 DXC。
+- 不直接调用 C 运行时（所有内存操作通过 SDL_malloc/SDL_free）
+
+## 支持的平台
+
+SDL_GPU 后端跨平台，通过 Vulkan / D3D12 / Metal 驱动支持：
+
+| 平台 | 图形驱动 | 状态 |
+|------|---------|------|
+| Linux | Vulkan (radv/AMDVLK) | 已测试 |
+| Windows | Vulkan / D3D12 | 待测试 |
+| macOS / iOS | Metal | 待测试 |
+
+通过 SDL hint 选择底层驱动：
+
+```c
+SDL_SetHint(SDL_HINT_GPU_DRIVER, "vulkan");      // Linux 默认
+SDL_SetHint(SDL_HINT_GPU_DRIVER, "direct3d12");  // Windows
+SDL_SetHint(SDL_HINT_GPU_DRIVER, "metal");       // macOS/iOS
+```
+
+## 构建
+
+```bash
+# 配置（Release）
+cmake -B build -G Ninja . -DCMAKE_BUILD_TYPE=Release
+
+# 编译
+ninja -C build
+
+# 静态库
+cmake -B build -G Ninja . -DBUILD_SHARED_LIBS=OFF
+```
+
+## 测试
+
+没有单元测试。测试方式：
+
+1. 构建本库
+2. 使用 [FNA3D_HLSL_Test](../FNA3D_HLSL_Test/) 中的渲染测试程序
+
+```bash
+cd ../FNA3D_HLSL_Test
+./build_linux.sh
+./out_linux/triangle_test
+```
+
+### Effect 数据结构
+
+与 master 分支不同，hlsl 分支移除了 `MOJOSHADER_effect**` 输出参数。Effect 元数据（technique、pass、参数等）现在直接存储在 `FNA3D_Effect` 内部，通过新增的 accessor API 查询：
+
+```c
+FNA3D_EffectTechnique* tech = FNA3D_GetEffectTechnique(effect, 0);
+const char* name = FNA3D_GetTechniqueName(tech);
+int32_t passes = FNA3D_GetTechniquePassCount(tech);
+```
+
+不再需要 `mojoshader.h`。加载 `.feb` 后即可直接使用上述 API 获取所有元数据。
+
+## 已知限制
+
+- **Uniform / 常量缓冲区更新 API 尚未实现** — Effect 参数只能使用 FEB 中烘焙的默认值，无法在运行时动态设置矩阵、光源等。详见 `FNA3D_Driver_SDL.c` 中 `ApplyEffect` 的注释。
+- **FEB 参数条目 stride 可能不正确** — `FNA3D_LoadEffect()` 按 32 字节 stride 索引参数，但每个参数条目至少 84 字节。在 `paramCount = 0` 时不影响。
+
+## 已移除的组件
+
+以下模块已从此分支删除：
+
+- MojoShader（git submodule + 所有引用）
+- D3D11 后端（`src/FNA3D_Driver_D3D11.*`）
+- OpenGL 后端（`src/FNA3D_Driver_OpenGL.*`）
+- Tracing 子系统（`src/FNA3D_Tracing.*`、`replay/`、`dumpspirv/`）
+- Visual Studio 项目（`visualc/`、`visualc-gdk/`）
+- Xcode 项目（`Xcode/`）
+
+## 代码约定
+
+- **C 方言**：`-std=gnu99`，`-Wall -Wno-strict-aliasing -pedantic`
+- **缩进**：Tab（tabstop=8），不用空格
+- **命名**：公开 API 使用 `FNA3D_` 前缀
+- **内存**：通过 `SDL_malloc`/`SDL_free`/`SDL_calloc`，不直接用 C 运行时
+- **资源释放**：命名为 `AddDispose*`（非 `Destroy*`），因为释放可能被渲染线程延迟
+
+## License
+
+zlib license，详见 LICENSE。
+
+## 问题反馈
 
 https://github.com/FNA-XNA/FNA3D/issues

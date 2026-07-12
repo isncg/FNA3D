@@ -1202,6 +1202,52 @@ void FNA3D_EndPassRestore(
 
 /* Effect Metadata Accessors — implemented in FNA3D_Effect.c */
 
+/* Effect Parameter Setters */
+
+void FNA3D_SetEffectParamValue(
+	FNA3D_Device *device,
+	FNA3D_Effect *effect,
+	const char *paramName,
+	const void *data,
+	uint32_t offset,
+	uint32_t length
+) {
+	if (device == NULL || effect == NULL || paramName == NULL || data == NULL)
+	{
+		return;
+	}
+	device->SetEffectParamValue(
+		device->driverData,
+		effect,
+		paramName,
+		data,
+		offset,
+		length
+	);
+}
+
+void FNA3D_SetEffectParamValueByHandle(
+	FNA3D_Device *device,
+	FNA3D_Effect *effect,
+	FNA3D_EffectParam *param,
+	const void *data,
+	uint32_t offset,
+	uint32_t length
+) {
+	if (device == NULL || effect == NULL || param == NULL || data == NULL)
+	{
+		return;
+	}
+	device->SetEffectParamValueByHandle(
+		device->driverData,
+		effect,
+		param,
+		data,
+		offset,
+		length
+	);
+}
+
 /* Queries */
 
 FNA3D_Query* FNA3D_CreateQuery(FNA3D_Device *device)

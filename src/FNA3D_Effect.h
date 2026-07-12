@@ -34,24 +34,6 @@
 #define FEB_MAGIC 0x42414E46 /* "FNAB" */
 #define FEB_VERSION 1
 
-/* Parameter Types */
-
-typedef enum FNA3D_EffectParamType
-{
-	FNA3D_EFFECTPARAM_FLOAT,
-	FNA3D_EFFECTPARAM_FLOAT2,
-	FNA3D_EFFECTPARAM_FLOAT3,
-	FNA3D_EFFECTPARAM_FLOAT4,
-	FNA3D_EFFECTPARAM_INT,
-	FNA3D_EFFECTPARAM_BOOL,
-	FNA3D_EFFECTPARAM_MATRIX,
-	FNA3D_EFFECTPARAM_TEXTURE,
-	FNA3D_EFFECTPARAM_TEXTURE1D,
-	FNA3D_EFFECTPARAM_TEXTURE2D,
-	FNA3D_EFFECTPARAM_TEXTURE3D,
-	FNA3D_EFFECTPARAM_TEXTURECUBE,
-} FNA3D_EffectParamType;
-
 /* Shader Stage */
 
 typedef enum FNA3D_ShaderStage
@@ -112,7 +94,6 @@ typedef enum FNA3D_EffectSamplerStateType
 /* Internal Effect Structures (defined before FNA3D_Effect which references them) */
 
 /* Internal-only typedefs (public ones like FNA3D_Effect are in FNA3D.h) */
-typedef struct FNA3D_EffectParam FNA3D_EffectParam;
 typedef struct FNA3D_EffectShader FNA3D_EffectShader;
 
 struct FNA3D_EffectParam
@@ -127,7 +108,37 @@ struct FNA3D_EffectParam
 		int32_t intValues[16];
 		uint32_t boolValue;
 	} defaultValue;
+	/* Runtime fields */
+	uint8_t dirty;
+	uint32_t bufferOffset;  /* byte offset in uniform data buffer */
+	union
+	{
+		float floatValues[16];
+		int32_t intValues[16];
+		uint32_t boolValue;
+	} currentValue;
 };
+
+/* Returns the byte size of an effect parameter type */
+static inline uint32_t FNA3D_GetParamSize(FNA3D_EffectParamType type)
+{
+	switch (type)
+	{
+		case FNA3D_EFFECTPARAM_FLOAT:   return 4;
+		case FNA3D_EFFECTPARAM_FLOAT2:  return 8;
+		case FNA3D_EFFECTPARAM_FLOAT3:  return 12;
+		case FNA3D_EFFECTPARAM_FLOAT4:  return 16;
+		case FNA3D_EFFECTPARAM_INT:     return 4;
+		case FNA3D_EFFECTPARAM_BOOL:    return 4;
+		case FNA3D_EFFECTPARAM_MATRIX:  return 64;
+		case FNA3D_EFFECTPARAM_TEXTURE:
+		case FNA3D_EFFECTPARAM_TEXTURE1D:
+		case FNA3D_EFFECTPARAM_TEXTURE2D:
+		case FNA3D_EFFECTPARAM_TEXTURE3D:
+		case FNA3D_EFFECTPARAM_TEXTURECUBE:
+		default: return 0;
+	}
+}
 
 struct FNA3D_EffectPass
 {
@@ -152,6 +163,8 @@ struct FNA3D_EffectShader
 	const char *entryPoint;
 	const uint8_t *spirvData;
 	uint32_t spirvSize;
+	uint32_t samplerCount;
+	uint32_t uniformBufferCount;
 };
 
 struct FNA3D_EffectStateChanges
@@ -187,6 +200,11 @@ struct FNA3D_Effect
 
 	/* State changes buffer (pre-allocated for max pass size) */
 	FNA3D_EffectStateChanges *stateChanges;
+
+	/* Opaque pointer for driver-specific effect data (e.g. SDLGPU_Effect).
+	 * Set by the driver during CreateEffect, read by driver during Apply etc.
+	 */
+	void *driverData;
 };
 
 /* Parser API (internal, used by effect loader and driver) */

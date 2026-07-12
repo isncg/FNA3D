@@ -139,8 +139,9 @@ uint8_t FNA3D_LoadEffect(
 	shaderData = data + shaderOffset;
 	spirvData = data + spirvOffset;
 
-	/* Bounds checks */
-	if (paramOffset + paramCount * 32 > dataLength ||
+	/* Bounds checks — parameter section uses variable-size entries,
+	 * so we only check that the offset is within bounds (not stride*count). */
+	if (paramOffset >= dataLength ||
 		techniqueOffset + techniqueCount * 16 > dataLength ||
 		passOffset + passCount * 24 > dataLength ||
 		shaderOffset + shaderCount * 24 > dataLength ||
@@ -190,31 +191,43 @@ uint8_t FNA3D_LoadEffect(
 	shaderData = effect->ownedData + shaderOffset;
 	spirvData = effect->ownedData + spirvOffset;
 
-	/* Parse parameters */
-	for (i = 0; i < paramCount; i++)
+	/* Parse parameters — read sequentially, not with a fixed stride.
+	 * Each parameter entry: nameOff(4) + semOff(4) + type(1) + pad(3)
+	 * + registerIndex(4) + defaultValue(64) + annotationCount(4) = 84 bytes
+	 * followed by annotationCount * 40 bytes of annotations.
+	 */
 	{
-		FNA3D_EffectParam *param = &effect->params[i];
-		const uint8_t *p = paramData + i * 32;
-		uint32_t nameOffset, semanticOffset;
-		uint32_t annotationCount;
-		uint8_t type;
+		uint32_t paramReadOff = 0;
+		for (i = 0; i < paramCount; i++)
+		{
+			FNA3D_EffectParam *param = &effect->params[i];
+			const uint8_t *p = paramData + paramReadOff;
+			uint32_t nameOffset, semanticOffset;
+			uint32_t annotationCount;
+			uint8_t type;
 
-		nameOffset = ReadU32(&p);
-		semanticOffset = ReadU32(&p);
-		type = ReadU8(&p);
-		p += 3; /* padding */
-		param->registerIndex = ReadU32(&p);
-		param->type = (FNA3D_EffectParamType) type;
-		param->name = ResolveString(stringTable, nameOffset, stringTableSize);
-		param->semantic = ResolveString(stringTable, semanticOffset, stringTableSize);
+			nameOffset = ReadU32(&p);
+			semanticOffset = ReadU32(&p);
+			type = ReadU8(&p);
+			p += 3; /* padding */
+			param->registerIndex = ReadU32(&p);
+			param->type = (FNA3D_EffectParamType) type;
+			param->name = ResolveString(stringTable, nameOffset, stringTableSize);
+			param->semantic = ResolveString(stringTable, semanticOffset, stringTableSize);
 
-		/* Read default value (16 floats = 64 bytes) */
-		SDL_memcpy(&param->defaultValue, p, 64);
-		p += 64;
+			/* Read default value (16 floats = 64 bytes) */
+			SDL_memcpy(&param->defaultValue, p, 64);
+			p += 64;
 
-		/* Skip annotations for now */
-		annotationCount = ReadU32(&p);
-		p += annotationCount * 40; /* annotation: name(4) + type(1) + pad(3) + value(32) */
+			/* Skip annotations for now */
+			annotationCount = ReadU32(&p);
+			paramReadOff += 84 + annotationCount * 40;
+
+			/* Initialize runtime fields */
+			param->dirty = 0;
+			param->bufferOffset = param->registerIndex * 16;
+			SDL_memcpy(&param->currentValue, &param->defaultValue, 64);
+		}
 	}
 
 	/* Parse techniques */
@@ -264,7 +277,8 @@ uint8_t FNA3D_LoadEffect(
 		entryOffset = ReadU32(&p);
 		sOffset = ReadU32(&p);
 		sSize = ReadU32(&p);
-		p += 4; /* reserved */
+		shader->samplerCount = ReadU32(&p);
+		shader->uniformBufferCount = ReadU32(&p);
 
 		shader->entryPoint = ResolveString(stringTable, entryOffset, stringTableSize);
 		shader->spirvData = spirvData + sOffset;
@@ -369,6 +383,96 @@ int32_t FNA3D_GetTechniquePassCount(
 		return 0;
 	}
 	return (int32_t) technique->passCount;
+}
+
+/* Parameter Introspection */
+
+int32_t FNA3D_GetEffectParamCount(FNA3D_Effect *effect)
+{
+	if (effect == NULL)
+	{
+		return 0;
+	}
+	return (int32_t) effect->paramCount;
+}
+
+FNA3D_EffectParam* FNA3D_GetEffectParam(
+	FNA3D_Effect *effect,
+	int32_t index
+) {
+	if (effect == NULL || index < 0 || (uint32_t) index >= effect->paramCount)
+	{
+		return NULL;
+	}
+	return &effect->params[index];
+}
+
+FNA3D_EffectParam* FNA3D_GetEffectParamByName(
+	FNA3D_Effect *effect,
+	const char *name
+) {
+	uint32_t i;
+	if (effect == NULL || name == NULL)
+	{
+		return NULL;
+	}
+	for (i = 0; i < effect->paramCount; i++)
+	{
+		if (SDL_strcmp(effect->params[i].name, name) == 0)
+		{
+			return &effect->params[i];
+		}
+	}
+	return NULL;
+}
+
+const char* FNA3D_GetParamName(FNA3D_EffectParam *param)
+{
+	if (param == NULL)
+	{
+		return NULL;
+	}
+	return param->name;
+}
+
+const char* FNA3D_GetParamSemantic(FNA3D_EffectParam *param)
+{
+	if (param == NULL)
+	{
+		return NULL;
+	}
+	return param->semantic;
+}
+
+FNA3D_EffectParamType FNA3D_GetParamType(FNA3D_EffectParam *param)
+{
+	if (param == NULL)
+	{
+		return FNA3D_EFFECTPARAM_FLOAT;
+	}
+	return param->type;
+}
+
+uint32_t FNA3D_GetParamRegisterIndex(FNA3D_EffectParam *param)
+{
+	if (param == NULL)
+	{
+		return 0;
+	}
+	return param->registerIndex;
+}
+
+/* Pass Metadata */
+
+const char* FNA3D_GetPassName(
+	FNA3D_EffectTechnique *technique,
+	int32_t passIndex
+) {
+	if (technique == NULL || passIndex < 0 || (uint32_t) passIndex >= technique->passCount)
+	{
+		return NULL;
+	}
+	return technique->passes[passIndex].name;
 }
 
 /* vim: set noexpandtab shiftwidth=8 tabstop=8: */

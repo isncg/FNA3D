@@ -341,8 +341,9 @@ typedef struct SDLGPU_Effect /* Cast from FNA3D_Effect* */
 	FNA3D_Effect *effectData;
 	SDL_GPUShader **vertexShaders;  /* one per pass */
 	SDL_GPUShader **pixelShaders;   /* one per pass */
-	SDL_GPUBuffer *uniformBuffer;
-	uint32_t uniformBufferSize;
+	uint8_t *uniformData;           /* CPU-side uniform buffer */
+	uint32_t uniformDataSize;       /* total size of uniform data */
+	uint8_t uniformDirty;           /* any parameter changed since last push */
 } SDLGPU_Effect;
 
 typedef struct SDLGPU_BufferHandle /* Cast from FNA3D_Buffer* */
@@ -3725,6 +3726,7 @@ static void SDLGPU_ReadBackbuffer(
 
 /* Effects */
 
+
 static void SDLGPU_CreateEffect(
 	FNA3D_Renderer *driverData,
 	uint8_t *effectCode,
@@ -3776,8 +3778,12 @@ static void SDLGPU_CreateEffect(
 			createInfo.entrypoint = vs->entryPoint;
 			createInfo.format = SDL_GPU_SHADERFORMAT_SPIRV;
 			createInfo.stage = SDL_GPU_SHADERSTAGE_VERTEX;
-			createInfo.num_samplers = MAX_TEXTURE_SAMPLERS;
-			createInfo.num_uniform_buffers = 1;
+			/* SDL_GPU needs at least 1 sampler slot for the descriptor
+			 * set to be bound (matches MojoShader's maxSamplerIndex
+			 * starting at 0, giving samplerSlots >= 1 always).
+			 */
+			createInfo.num_samplers = SDL_max(vs->samplerCount, 1);
+			createInfo.num_uniform_buffers = vs->uniformBufferCount;
 			result->vertexShaders[i] = SDL_CreateGPUShader(
 				renderer->device, &createInfo);
 		}
@@ -3793,14 +3799,40 @@ static void SDLGPU_CreateEffect(
 			createInfo.entrypoint = ps->entryPoint;
 			createInfo.format = SDL_GPU_SHADERFORMAT_SPIRV;
 			createInfo.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
-			createInfo.num_samplers = MAX_TEXTURE_SAMPLERS;
-			createInfo.num_uniform_buffers = 1;
+			createInfo.num_samplers = SDL_max(ps->samplerCount, 1);
+			createInfo.num_uniform_buffers = ps->uniformBufferCount;
 			result->pixelShaders[i] = SDL_CreateGPUShader(
 				renderer->device, &createInfo);
 		}
 	}
 
-	*effect = (FNA3D_Effect*) result;
+	/* Compute total uniform buffer size and allocate CPU-side buffer */
+	{
+		uint32_t maxEnd = 0;
+		for (i = 0; i < result->effectData->paramCount; i++)
+		{
+			FNA3D_EffectParam *param = &result->effectData->params[i];
+			uint32_t paramSize = FNA3D_GetParamSize(param->type);
+			uint32_t paramEnd = param->bufferOffset + paramSize;
+			if (paramEnd > maxEnd) maxEnd = paramEnd;
+		}
+		result->uniformDataSize = maxEnd;
+		if (result->uniformDataSize > 0)
+		{
+			result->uniformData = (uint8_t*) SDL_calloc(1, result->uniformDataSize);
+			for (i = 0; i < result->effectData->paramCount; i++)
+			{
+				FNA3D_EffectParam *param = &result->effectData->params[i];
+				uint32_t paramSize = FNA3D_GetParamSize(param->type);
+				if (paramSize > 0)
+					SDL_memcpy(result->uniformData + param->bufferOffset,
+						&param->defaultValue, paramSize);
+			}
+		}
+	}
+
+	result->effectData->driverData = result;
+	*effect = (FNA3D_Effect*) result->effectData;
 }
 
 static void SDLGPU_CloneEffect(
@@ -3809,7 +3841,7 @@ static void SDLGPU_CloneEffect(
 	FNA3D_Effect **effect
 ) {
 	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
-	SDLGPU_Effect *sdlCloneSource = (SDLGPU_Effect*) cloneSource;
+	SDLGPU_Effect *sdlCloneSource = (SDLGPU_Effect*) cloneSource->driverData;
 	FNA3D_Effect *clonedData;
 	SDLGPU_Effect *result;
 	uint32_t i;
@@ -3842,7 +3874,17 @@ static void SDLGPU_CloneEffect(
 		result->pixelShaders[i] = sdlCloneSource->pixelShaders[i];
 	}
 
-	*effect = (FNA3D_Effect*) result;
+	/* Copy uniform data */
+	result->uniformDataSize = sdlCloneSource->uniformDataSize;
+	result->uniformDirty = sdlCloneSource->uniformDirty;
+	if (result->uniformDataSize > 0 && sdlCloneSource->uniformData != NULL)
+	{
+		result->uniformData = (uint8_t*) SDL_malloc(result->uniformDataSize);
+		SDL_memcpy(result->uniformData, sdlCloneSource->uniformData, result->uniformDataSize);
+	}
+
+	clonedData->driverData = result;
+	*effect = clonedData;
 }
 
 static void SDLGPU_AddDisposeEffect(
@@ -3850,7 +3892,7 @@ static void SDLGPU_AddDisposeEffect(
 	FNA3D_Effect *effect
 ) {
 	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
-	SDLGPU_Effect *gpuEffect = (SDLGPU_Effect*) effect;
+	SDLGPU_Effect *gpuEffect = (SDLGPU_Effect*) effect->driverData;
 	uint32_t i;
 
 	if (effect == NULL)
@@ -3891,10 +3933,9 @@ static void SDLGPU_AddDisposeEffect(
 		SDL_free(gpuEffect->pixelShaders);
 	}
 
-	if (gpuEffect->uniformBuffer != NULL)
+	if (gpuEffect->uniformData != NULL)
 	{
-		SDL_ReleaseGPUBuffer(renderer->device,
-			gpuEffect->uniformBuffer);
+		SDL_free(gpuEffect->uniformData);
 	}
 
 	FNA3D_Internal_DestroyEffect(gpuEffect->effectData);
@@ -3906,9 +3947,7 @@ static void SDLGPU_SetEffectTechnique(
 	FNA3D_Effect *effect,
 	FNA3D_EffectTechnique *technique
 ) {
-	FNA3D_Effect *effectData = ((SDLGPU_Effect*) effect)->effectData;
-
-	effectData->currentTechnique = technique;
+	effect->currentTechnique = technique;
 
 	(void)(driverData);
 }
@@ -3920,9 +3959,9 @@ static void SDLGPU_ApplyEffect(
 	FNA3D_EffectStateChanges *stateChanges
 ) {
 	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
-	SDLGPU_Effect *gpuEffect = (SDLGPU_Effect*) effect;
-	FNA3D_Effect *effectData = gpuEffect->effectData;
-	const FNA3D_EffectTechnique *technique = effectData->currentTechnique;
+	SDLGPU_Effect *gpuEffect = (SDLGPU_Effect*) effect->driverData;
+	FNA3D_Effect *effectData = effect;
+	const FNA3D_EffectTechnique *technique = effect->currentTechnique;
 
 	renderer->needFragmentSamplerBind = 1;
 	renderer->needVertexSamplerBind = 1;
@@ -3948,6 +3987,72 @@ static void SDLGPU_ApplyEffect(
 			sizeof(FNA3D_EffectStateChanges));
 	}
 
+	/* Push uniform data to GPU — must happen every frame because
+	 * command buffers are reset each submission.
+	 * Only push to stages that actually have uniform buffers
+	 * (matches MojoShader's per-stage uniformBufferSize > 0 check).
+	 */
+	if (gpuEffect->uniformData != NULL && gpuEffect->uniformDataSize > 0)
+	{
+		FNA3D_EffectPass *curPass = &effectData->passes[pass];
+		uint8_t vsHasUniforms = 0, psHasUniforms = 0;
+
+		if (curPass->vertexShaderIndex >= 0)
+		{
+			vsHasUniforms = (effectData->shaders[
+				curPass->vertexShaderIndex].uniformBufferCount > 0);
+		}
+		if (curPass->pixelShaderIndex >= 0)
+		{
+			psHasUniforms = (effectData->shaders[
+				curPass->pixelShaderIndex].uniformBufferCount > 0);
+		}
+
+		SDL_Log("SDLGPU_ApplyEffect: uniformDataSize=%u vsHas=%u psHas=%u "
+			"vsSamplers=%u vsUBOs=%u psSamplers=%u psUBOs=%u",
+			gpuEffect->uniformDataSize,
+			vsHasUniforms, psHasUniforms,
+			(curPass->vertexShaderIndex >= 0
+				? effectData->shaders[curPass->vertexShaderIndex].samplerCount : 0),
+			(curPass->vertexShaderIndex >= 0
+				? effectData->shaders[curPass->vertexShaderIndex].uniformBufferCount : 0),
+			(curPass->pixelShaderIndex >= 0
+				? effectData->shaders[curPass->pixelShaderIndex].samplerCount : 0),
+			(curPass->pixelShaderIndex >= 0
+				? effectData->shaders[curPass->pixelShaderIndex].uniformBufferCount : 0));
+
+		SDL_LockMutex(renderer->commandLock);
+		if (vsHasUniforms)
+		{
+			SDL_Log("  -> Pushing VERTEX uniform data (slot 0, %u bytes)",
+				gpuEffect->uniformDataSize);
+			SDL_PushGPUVertexUniformData(
+				renderer->renderCommandBuffer,
+				0, /* slot 0 */
+				gpuEffect->uniformData,
+				gpuEffect->uniformDataSize
+			);
+		}
+		if (psHasUniforms)
+		{
+			SDL_Log("  -> Pushing FRAGMENT uniform data (slot 0, %u bytes)",
+				gpuEffect->uniformDataSize);
+			SDL_PushGPUFragmentUniformData(
+				renderer->renderCommandBuffer,
+				0, /* slot 0 */
+				gpuEffect->uniformData,
+				gpuEffect->uniformDataSize
+			);
+		}
+		SDL_UnlockMutex(renderer->commandLock);
+		gpuEffect->uniformDirty = 0;
+	}
+	else
+	{
+		SDL_Log("SDLGPU_ApplyEffect: NO uniform data (ptr=%p size=%u)",
+			(void*)gpuEffect->uniformData, gpuEffect->uniformDataSize);
+	}
+
 	(void)(technique);
 }
 
@@ -3957,7 +4062,7 @@ static void SDLGPU_BeginPassRestore(
 	FNA3D_EffectStateChanges *stateChanges
 ) {
 	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
-	SDLGPU_Effect *gpuEffect = (SDLGPU_Effect*) effect;
+	SDLGPU_Effect *gpuEffect = (SDLGPU_Effect*) effect->driverData;
 
 	renderer->needFragmentSamplerBind = 1;
 	renderer->needVertexSamplerBind = 1;
@@ -3966,13 +4071,13 @@ static void SDLGPU_BeginPassRestore(
 	renderer->currentVertexShader = gpuEffect->vertexShaders[0];
 	renderer->currentFragmentShader = gpuEffect->pixelShaders[0];
 
-	renderer->currentEffect = gpuEffect->effectData;
-	renderer->currentTechnique = gpuEffect->effectData->currentTechnique;
+	renderer->currentEffect = effect;
+	renderer->currentTechnique = effect->currentTechnique;
 	renderer->currentPass = 0;
 
-	if (stateChanges != NULL && gpuEffect->effectData->stateChanges != NULL)
+	if (stateChanges != NULL && effect->stateChanges != NULL)
 	{
-		SDL_memcpy(stateChanges, gpuEffect->effectData->stateChanges,
+		SDL_memcpy(stateChanges, effect->stateChanges,
 			sizeof(FNA3D_EffectStateChanges));
 	}
 }
@@ -3990,6 +4095,79 @@ static void SDLGPU_EndPassRestore(
 	renderer->currentFragmentShader = NULL;
 
 	(void)(effect);
+}
+
+/* Effect Parameter Setters */
+
+static void SDLGPU_SetEffectParamValueByHandle(
+	FNA3D_Renderer *driverData,
+	FNA3D_Effect *effect,
+	FNA3D_EffectParam *param,
+	const void *data,
+	uint32_t offset,
+	uint32_t length
+) {
+	SDLGPU_Effect *gpuEffect;
+	uint32_t paramSize;
+
+	(void)(driverData);
+
+	if (effect == NULL || param == NULL || data == NULL || length == 0)
+		return;
+
+	gpuEffect = (SDLGPU_Effect*) effect->driverData;
+	if (gpuEffect == NULL || gpuEffect->uniformData == NULL)
+		return;
+
+	paramSize = FNA3D_GetParamSize(param->type);
+	if (offset + length > paramSize)
+	{
+		FNA3D_LogWarn("SetEffectParamValue: offset+length (%u) exceeds param size (%u)",
+			offset + length, paramSize);
+		if (offset >= paramSize) return;
+		length = paramSize - offset;
+	}
+
+	SDL_memcpy(
+		gpuEffect->uniformData + param->bufferOffset + offset,
+		data,
+		length
+	);
+
+	SDL_memcpy(
+		((uint8_t*) &param->currentValue) + offset,
+		data,
+		length
+	);
+
+	param->dirty = 1;
+	gpuEffect->uniformDirty = 1;
+}
+
+static void SDLGPU_SetEffectParamValue(
+	FNA3D_Renderer *driverData,
+	FNA3D_Effect *effect,
+	const char *paramName,
+	const void *data,
+	uint32_t offset,
+	uint32_t length
+) {
+	FNA3D_EffectParam *param;
+
+	(void)(driverData);
+
+	if (effect == NULL || paramName == NULL || data == NULL || length == 0)
+		return;
+
+	param = FNA3D_GetEffectParamByName(effect, paramName);
+	if (param == NULL)
+	{
+		FNA3D_LogWarn("Effect param not found: %s", paramName);
+		return;
+	}
+
+	SDLGPU_SetEffectParamValueByHandle(
+		driverData, effect, param, data, offset, length);
 }
 
 /* Queries */

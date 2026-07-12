@@ -1335,6 +1335,23 @@ FNA3DAPI void FNA3D_GetIndexBufferData(
 
 /* Effects */
 
+/* Effect Parameter Types */
+typedef enum FNA3D_EffectParamType
+{
+	FNA3D_EFFECTPARAM_FLOAT,
+	FNA3D_EFFECTPARAM_FLOAT2,
+	FNA3D_EFFECTPARAM_FLOAT3,
+	FNA3D_EFFECTPARAM_FLOAT4,
+	FNA3D_EFFECTPARAM_INT,
+	FNA3D_EFFECTPARAM_BOOL,
+	FNA3D_EFFECTPARAM_MATRIX,
+	FNA3D_EFFECTPARAM_TEXTURE,
+	FNA3D_EFFECTPARAM_TEXTURE1D,
+	FNA3D_EFFECTPARAM_TEXTURE2D,
+	FNA3D_EFFECTPARAM_TEXTURE3D,
+	FNA3D_EFFECTPARAM_TEXTURECUBE,
+} FNA3D_EffectParamType;
+
 /* Parses and compiles an FNA3D Effect binary.
  *
  * effectCode:		The FNA3D Effect binary blob (FEB format).
@@ -1443,6 +1460,70 @@ FNA3DAPI const char* FNA3D_GetTechniqueName(
 /* Returns the number of passes in a technique. */
 FNA3DAPI int32_t FNA3D_GetTechniquePassCount(
 	FNA3D_EffectTechnique *technique
+);
+
+/* Returns the name of a pass within a technique. */
+FNA3DAPI const char* FNA3D_GetPassName(
+	FNA3D_EffectTechnique *technique,
+	int32_t passIndex
+);
+
+/* Effect Parameter Introspection */
+
+/* Opaque type for effect parameters (defined in FNA3D_Effect.h) */
+typedef struct FNA3D_EffectParam FNA3D_EffectParam;
+
+/* Returns the number of parameters in an effect. */
+FNA3DAPI int32_t FNA3D_GetEffectParamCount(FNA3D_Effect *effect);
+
+/* Returns a parameter by index. */
+FNA3DAPI FNA3D_EffectParam* FNA3D_GetEffectParam(
+	FNA3D_Effect *effect,
+	int32_t index
+);
+
+/* Finds a parameter by name. Returns NULL if not found. */
+FNA3DAPI FNA3D_EffectParam* FNA3D_GetEffectParamByName(
+	FNA3D_Effect *effect,
+	const char *name
+);
+
+/* Returns the name of a parameter. */
+FNA3DAPI const char* FNA3D_GetParamName(FNA3D_EffectParam *param);
+
+/* Returns the HLSL semantic of a parameter. */
+FNA3DAPI const char* FNA3D_GetParamSemantic(FNA3D_EffectParam *param);
+
+/* Returns the type of a parameter. */
+FNA3DAPI FNA3D_EffectParamType FNA3D_GetParamType(FNA3D_EffectParam *param);
+
+/* Returns the HLSL register index of a parameter. */
+FNA3DAPI uint32_t FNA3D_GetParamRegisterIndex(FNA3D_EffectParam *param);
+
+/* Effect Parameter Setters */
+
+/* Sets a parameter value by name, writing raw bytes at the given offset.
+ * Marks the parameter dirty so it will be committed on the next ApplyEffect.
+ */
+FNA3DAPI void FNA3D_SetEffectParamValue(
+	FNA3D_Device *device,
+	FNA3D_Effect *effect,
+	const char *paramName,
+	const void *data,
+	uint32_t offset,
+	uint32_t length
+);
+
+/* Sets a parameter value by handle, avoiding the name lookup overhead.
+ * Marks the parameter dirty so it will be committed on the next ApplyEffect.
+ */
+FNA3DAPI void FNA3D_SetEffectParamValueByHandle(
+	FNA3D_Device *device,
+	FNA3D_Effect *effect,
+	FNA3D_EffectParam *param,
+	const void *data,
+	uint32_t offset,
+	uint32_t length
 );
 
 /* Queries */

@@ -646,6 +646,22 @@ struct FNA3D_Device
 		FNA3D_Renderer *driverData,
 		FNA3D_Effect *effect
 	);
+	void (*SetEffectParamValue)(
+		FNA3D_Renderer *driverData,
+		FNA3D_Effect *effect,
+		const char *paramName,
+		const void *data,
+		uint32_t offset,
+		uint32_t length
+	);
+	void (*SetEffectParamValueByHandle)(
+		FNA3D_Renderer *driverData,
+		FNA3D_Effect *effect,
+		FNA3D_EffectParam *param,
+		const void *data,
+		uint32_t offset,
+		uint32_t length
+	);
 
 	/* Queries */
 
@@ -760,6 +776,8 @@ struct FNA3D_Device
 	ASSIGN_DRIVER_FUNC(ApplyEffect, name) \
 	ASSIGN_DRIVER_FUNC(BeginPassRestore, name) \
 	ASSIGN_DRIVER_FUNC(EndPassRestore, name) \
+	ASSIGN_DRIVER_FUNC(SetEffectParamValue, name) \
+	ASSIGN_DRIVER_FUNC(SetEffectParamValueByHandle, name) \
 	ASSIGN_DRIVER_FUNC(CreateQuery, name) \
 	ASSIGN_DRIVER_FUNC(AddDisposeQuery, name) \
 	ASSIGN_DRIVER_FUNC(QueryBegin, name) \
