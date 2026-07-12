@@ -27,7 +27,6 @@
 #ifndef FNA3D_DRIVER_H
 #define FNA3D_DRIVER_H
 
-#include "mojoshader.h"
 #include "FNA3D.h"
 #include "FNA3D_SysRenderer.h"
 
@@ -203,43 +202,6 @@ static inline int32_t PrimitiveVerts(
 				"Unrecognized primitive type!"
 			);
 			return 0;
-	}
-}
-
-static inline MOJOSHADER_usage VertexAttribUsage(
-	FNA3D_VertexElementUsage usage
-) {
-	switch (usage)
-	{
-		case FNA3D_VERTEXELEMENTUSAGE_POSITION:
-			return MOJOSHADER_USAGE_POSITION;
-		case FNA3D_VERTEXELEMENTUSAGE_COLOR:
-			return MOJOSHADER_USAGE_COLOR;
-		case FNA3D_VERTEXELEMENTUSAGE_TEXTURECOORDINATE:
-			return MOJOSHADER_USAGE_TEXCOORD;
-		case FNA3D_VERTEXELEMENTUSAGE_NORMAL:
-			return MOJOSHADER_USAGE_NORMAL;
-		case FNA3D_VERTEXELEMENTUSAGE_BINORMAL:
-			return MOJOSHADER_USAGE_BINORMAL;
-		case FNA3D_VERTEXELEMENTUSAGE_TANGENT:
-			return MOJOSHADER_USAGE_TANGENT;
-		case FNA3D_VERTEXELEMENTUSAGE_BLENDINDICES:
-			return MOJOSHADER_USAGE_BLENDINDICES;
-		case FNA3D_VERTEXELEMENTUSAGE_BLENDWEIGHT:
-			return MOJOSHADER_USAGE_BLENDWEIGHT;
-		case FNA3D_VERTEXELEMENTUSAGE_FOG:
-			return MOJOSHADER_USAGE_FOG;
-		case FNA3D_VERTEXELEMENTUSAGE_POINTSIZE:
-			return MOJOSHADER_USAGE_POINTSIZE;
-		case FNA3D_VERTEXELEMENTUSAGE_SAMPLE:
-			return MOJOSHADER_USAGE_SAMPLE;
-		case FNA3D_VERTEXELEMENTUSAGE_TESSELATEFACTOR:
-			return MOJOSHADER_USAGE_TESSFACTOR;
-		default:
-			FNA3D_LogError(
-				"Unrecognized VertexElementUsage!"
-			);
-			return (MOJOSHADER_usage) 0;
 	}
 }
 
@@ -653,14 +615,12 @@ struct FNA3D_Device
 		FNA3D_Renderer *driverData,
 		uint8_t *effectCode,
 		uint32_t effectCodeLength,
-		FNA3D_Effect **effect,
-		MOJOSHADER_effect **result
+		FNA3D_Effect **effect
 	);
 	void (*CloneEffect)(
 		FNA3D_Renderer *driverData,
 		FNA3D_Effect *cloneSource,
-		FNA3D_Effect **effect,
-		MOJOSHADER_effect **result
+		FNA3D_Effect **effect
 	);
 	void (*AddDisposeEffect)(
 		FNA3D_Renderer *driverData,
@@ -669,18 +629,18 @@ struct FNA3D_Device
 	void (*SetEffectTechnique)(
 		FNA3D_Renderer *driverData,
 		FNA3D_Effect *effect,
-		MOJOSHADER_effectTechnique *technique
+		FNA3D_EffectTechnique *technique
 	);
 	void (*ApplyEffect)(
 		FNA3D_Renderer *driverData,
 		FNA3D_Effect *effect,
 		uint32_t pass,
-		MOJOSHADER_effectStateChanges *stateChanges
+		FNA3D_EffectStateChanges *stateChanges
 	);
 	void (*BeginPassRestore)(
 		FNA3D_Renderer *driverData,
 		FNA3D_Effect *effect,
-		MOJOSHADER_effectStateChanges *stateChanges
+		FNA3D_EffectStateChanges *stateChanges
 	);
 	void (*EndPassRestore)(
 		FNA3D_Renderer *driverData,
@@ -733,7 +693,7 @@ struct FNA3D_Device
 
 	FNA3D_Texture* (*CreateSysTexture)(
 		FNA3D_Renderer *driverData,
-		FNA3D_SysTextureEXT *externalTextureInfo
+		FNA3D_SysTextureEXT *systexture
 	);
 
 	/* Opaque pointer for the Driver */
@@ -829,8 +789,6 @@ typedef struct FNA3D_Driver
 	);
 } FNA3D_Driver;
 
-FNA3D_SHAREDINTERNAL FNA3D_Driver D3D11Driver;
-FNA3D_SHAREDINTERNAL FNA3D_Driver OpenGLDriver;
 FNA3D_SHAREDINTERNAL FNA3D_Driver SDLGPUDriver;
 
 #endif /* FNA3D_DRIVER_H */

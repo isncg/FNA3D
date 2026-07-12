@@ -63,6 +63,9 @@ typedef struct FNA3D_Texture FNA3D_Texture;
 typedef struct FNA3D_Buffer FNA3D_Buffer;
 typedef struct FNA3D_Renderbuffer FNA3D_Renderbuffer;
 typedef struct FNA3D_Effect FNA3D_Effect;
+typedef struct FNA3D_EffectTechnique FNA3D_EffectTechnique;
+typedef struct FNA3D_EffectPass FNA3D_EffectPass;
+typedef struct FNA3D_EffectStateChanges FNA3D_EffectStateChanges;
 typedef struct FNA3D_Query FNA3D_Query;
 
 /* Enumerations, should match XNA 4.0 */
@@ -469,9 +472,9 @@ typedef struct FNA3D_RenderTargetBinding
 
 /* Version API */
 
-#define FNA3D_ABI_VERSION	 0
-#define FNA3D_MAJOR_VERSION	26
-#define FNA3D_MINOR_VERSION	 7
+#define FNA3D_ABI_VERSION	 1
+#define FNA3D_MAJOR_VERSION	27
+#define FNA3D_MINOR_VERSION	 0
 #define FNA3D_PATCH_VERSION	 0
 
 #define FNA3D_COMPILED_VERSION ( \
@@ -1332,40 +1335,28 @@ FNA3DAPI void FNA3D_GetIndexBufferData(
 
 /* Effects */
 
-/* When using this API, be sure to include mojoshader.h! */
-#ifndef _INCL_MOJOSHADER_H_
-typedef struct MOJOSHADER_effect MOJOSHADER_effect;
-typedef struct MOJOSHADER_effectTechnique MOJOSHADER_effectTechnique;
-typedef struct MOJOSHADER_effectStateChanges MOJOSHADER_effectStateChanges;
-#endif /* _INCL_MOJOSHADER_H_ */
-
-/* Parses and compiles a Direct3D 9 Effects Framework binary.
+/* Parses and compiles an FNA3D Effect binary.
  *
- * effectCode:		The D3D9 Effect binary blob.
+ * effectCode:		The FNA3D Effect binary blob (FEB format).
  * effectCodeLength:	The size (in bytes) of the blob.
  * effect:		Filled with the compiled FNA3D_Effect*.
- * effectData:		Filled with the parsed Effect Framework data. This
- *			pointer is valid until the effect is disposed.
  */
-FNA3DAPI void FNA3D_CreateEffect(
+FNA3DAPI uint8_t FNA3D_CreateEffect(
 	FNA3D_Device *device,
 	uint8_t *effectCode,
 	uint32_t effectCodeLength,
-	FNA3D_Effect **effect,
-	MOJOSHADER_effect **effectData
+	FNA3D_Effect **effect
 );
 
 /* Copies a compiled Effect, including its current technique/parameter data.
  *
  * cloneSource:	The FNA3D_Effect to copy.
  * effect:	Filled with the new compiled FNA3D_Effect*.
- * effectData:	Filled with the copied Effect Framework data.
  */
 FNA3DAPI void FNA3D_CloneEffect(
 	FNA3D_Device *device,
 	FNA3D_Effect *cloneSource,
-	FNA3D_Effect **effect,
-	MOJOSHADER_effect **effectData
+	FNA3D_Effect **effect
 );
 
 /* Sends an Effect to be destroyed by the renderer. Note that we call it
@@ -1388,7 +1379,7 @@ FNA3DAPI void FNA3D_AddDisposeEffect(
 FNA3DAPI void FNA3D_SetEffectTechnique(
 	FNA3D_Device *device,
 	FNA3D_Effect *effect,
-	MOJOSHADER_effectTechnique *technique
+	FNA3D_EffectTechnique *technique
 );
 
 /* Applies an effect pass from a given Effect, setting the active shader program
@@ -1398,13 +1389,13 @@ FNA3DAPI void FNA3D_SetEffectTechnique(
  * pass:		The current technique's pass index to be applied.
  * stateChanges:	Structure to be filled with any render state changes
  *			made by the Effect. This must be valid for the entire
- * 			duration that this Effect is being applied.
+ *			duration that this Effect is being applied.
  */
 FNA3DAPI void FNA3D_ApplyEffect(
 	FNA3D_Device *device,
 	FNA3D_Effect *effect,
 	uint32_t pass,
-	MOJOSHADER_effectStateChanges *stateChanges
+	FNA3D_EffectStateChanges *stateChanges
 );
 
 /* Applies an effect pass from a given Effect, setting the active shader program
@@ -1415,12 +1406,12 @@ FNA3DAPI void FNA3D_ApplyEffect(
  * effect:		The Effect to be applied.
  * stateChanges:	Structure to be filled with any render state changes
  *			made by the Effect. This must be valid for the entire
- * 			duration that this Effect is being applied.
+ *			duration that this Effect is being applied.
  */
 FNA3DAPI void FNA3D_BeginPassRestore(
 	FNA3D_Device *device,
 	FNA3D_Effect *effect,
-	MOJOSHADER_effectStateChanges *stateChanges
+	FNA3D_EffectStateChanges *stateChanges
 );
 
 /* Ends a pass started by BeginPassRestore, unsetting the current Effect and
@@ -1431,6 +1422,27 @@ FNA3DAPI void FNA3D_BeginPassRestore(
 FNA3DAPI void FNA3D_EndPassRestore(
 	FNA3D_Device *device,
 	FNA3D_Effect *effect
+);
+
+/* Effect Metadata Accessors */
+
+/* Returns the number of techniques in an effect. */
+FNA3DAPI int32_t FNA3D_GetEffectTechniqueCount(FNA3D_Effect *effect);
+
+/* Returns a technique by index. */
+FNA3DAPI FNA3D_EffectTechnique* FNA3D_GetEffectTechnique(
+	FNA3D_Effect *effect,
+	int32_t index
+);
+
+/* Returns the name of a technique. */
+FNA3DAPI const char* FNA3D_GetTechniqueName(
+	FNA3D_EffectTechnique *technique
+);
+
+/* Returns the number of passes in a technique. */
+FNA3DAPI int32_t FNA3D_GetTechniquePassCount(
+	FNA3D_EffectTechnique *technique
 );
 
 /* Queries */

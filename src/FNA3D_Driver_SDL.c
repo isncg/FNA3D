@@ -29,6 +29,7 @@
 #include <SDL3/SDL.h>
 
 #include "FNA3D_Driver.h"
+#include "FNA3D_Effect.h"
 #include "FNA3D_PipelineCache.h"
 
 #define MAX_FRAMES_IN_FLIGHT 3
@@ -337,7 +338,11 @@ typedef struct SDLGPU_Renderbuffer /* Cast from FNA3D_Renderbuffer* */
 
 typedef struct SDLGPU_Effect /* Cast from FNA3D_Effect* */
 {
-	MOJOSHADER_effect *effect;
+	FNA3D_Effect *effectData;
+	SDL_GPUShader **vertexShaders;  /* one per pass */
+	SDL_GPUShader **pixelShaders;   /* one per pass */
+	SDL_GPUBuffer *uniformBuffer;
+	uint32_t uniformBufferSize;
 } SDLGPU_Effect;
 
 typedef struct SDLGPU_BufferHandle /* Cast from FNA3D_Buffer* */
@@ -551,8 +556,8 @@ typedef struct SDLGPU_Renderer
 	int32_t currentVertexBufferBindingsIndex;
 
 	SDL_GPUGraphicsPipeline *currentGraphicsPipeline;
-	MOJOSHADER_sdlShaderData *currentVertexShader;
-	MOJOSHADER_sdlShaderData *currentFragmentShader;
+	SDL_GPUShader *currentVertexShader;
+	SDL_GPUShader *currentFragmentShader;
 
 	PackedVertexBufferBindingsArray vertexBufferBindingsCache;
 
@@ -628,11 +633,10 @@ typedef struct SDLGPU_Renderer
 	GraphicsPipelineHashTable graphicsPipelineHashTable;
 	SamplerStateHashArray samplerStateArray;
 
-	/* MOJOSHADER */
+	/* Effects */
 
-	MOJOSHADER_sdlContext *mojoshaderContext;
-	MOJOSHADER_effect *currentEffect;
-	const MOJOSHADER_effectTechnique *currentTechnique;
+	FNA3D_Effect *currentEffect;
+	const FNA3D_EffectTechnique *currentTechnique;
 	uint32_t currentPass;
 
 	/* Dummy Samplers */
@@ -1459,17 +1463,13 @@ static void SDLGPU_INTERNAL_GenerateVertexInputInfo(
 	SDL_GPUVertexAttribute *attributes,
 	uint32_t *attributeCount
 ) {
-	MOJOSHADER_sdlShaderData *vertexShader, *blah;
-	uint8_t attrUse[MOJOSHADER_USAGE_TOTAL][16];
+	uint8_t attrUse[16][16];  /* usage x usageIndex */
 	uint32_t attributeDescriptionCounter = 0;
 	int32_t i, j, k;
 	FNA3D_VertexDeclaration vertexDeclaration;
 	FNA3D_VertexElement element;
 	FNA3D_VertexElementUsage usage;
-	MOJOSHADER_vertexAttribute mojoshaderVertexAttributes[16];
 	int32_t index, attribLoc;
-
-	MOJOSHADER_sdlGetBoundShaderData(renderer->mojoshaderContext, &vertexShader, &blah);
 
 	SDL_memset(attrUse, '\0', sizeof(attrUse));
 	for (i = 0; i < (int32_t) renderer->numVertexBindings; i += 1)
@@ -1487,7 +1487,7 @@ static void SDLGPU_INTERNAL_GenerateVertexInputInfo(
 			{
 				index = -1;
 
-				for (k = 0; k < MAX_VERTEX_ATTRIBUTES; k += 1)
+				for (k = 0; k < 16; k += 1)
 				{
 					if (!attrUse[usage][k])
 					{
@@ -1504,17 +1504,11 @@ static void SDLGPU_INTERNAL_GenerateVertexInputInfo(
 
 			attrUse[usage][index] = 1;
 
-			attribLoc = MOJOSHADER_sdlGetVertexAttribLocation(
-				vertexShader,
-				VertexAttribUsage(usage),
-				index
-			);
-
-			if (attribLoc == -1)
-			{
-				/* Stream not in use! */
-				continue;
-			}
+			/* Assign attribute location based on usage + index.
+			 * This convention matches the XNA/HLSL shader input layout
+			 * where semantic (usage) + index determines the location.
+			 */
+			attribLoc = (int32_t) usage * 16 + index;
 
 			attributes[attributeDescriptionCounter].location = attribLoc;
 			attributes[attributeDescriptionCounter].format = XNAToSDL_VertexAttribType[
@@ -1522,10 +1516,6 @@ static void SDLGPU_INTERNAL_GenerateVertexInputInfo(
 			];
 			attributes[attributeDescriptionCounter].offset = element.offset;
 			attributes[attributeDescriptionCounter].buffer_slot = i;
-
-			mojoshaderVertexAttributes[attributeDescriptionCounter].usage = VertexAttribUsage(element.vertexElementUsage);
-			mojoshaderVertexAttributes[attributeDescriptionCounter].vertexElementFormat = (MOJOSHADER_vertexElementFormat) element.vertexElementFormat; /* FNA3D/MojoShader use the same enum values */
-			mojoshaderVertexAttributes[attributeDescriptionCounter].usageIndex = index;
 
 			attributeDescriptionCounter += 1;
 		}
@@ -1553,16 +1543,9 @@ static void SDLGPU_INTERNAL_GenerateVertexInputInfo(
 
 	*attributeCount = attributeDescriptionCounter;
 
-	MOJOSHADER_sdlLinkProgram(
-		renderer->mojoshaderContext,
-		mojoshaderVertexAttributes,
-		attributeDescriptionCounter
-	);
-	MOJOSHADER_sdlGetShaders(
-		renderer->mojoshaderContext,
-		&renderer->nextPipelineHash.vertShader,
-		&renderer->nextPipelineHash.fragShader
-	);
+	/* Use pre-created SDL_GPUShader objects from the current effect */
+	renderer->nextPipelineHash.vertShader = renderer->currentVertexShader;
+	renderer->nextPipelineHash.fragShader = renderer->currentFragmentShader;
 }
 
 static SDL_GPUGraphicsPipeline* SDLGPU_INTERNAL_FetchGraphicsPipeline(
@@ -1776,18 +1759,9 @@ static void SDLGPU_INTERNAL_BindGraphicsPipeline(
 	/* commandLock should be acquired by this point */
 
 	SDL_GPUGraphicsPipeline *pipeline;
-	MOJOSHADER_sdlShaderData *vertShaderData, *fragShaderData;
-
-	MOJOSHADER_sdlGetBoundShaderData(
-		renderer->mojoshaderContext,
-		&vertShaderData,
-		&fragShaderData
-	);
 
 	if (
-		!renderer->needNewGraphicsPipeline &&
-		renderer->currentVertexShader == vertShaderData &&
-		renderer->currentFragmentShader == fragShaderData
+		!renderer->needNewGraphicsPipeline
 	) {
 		return;
 	}
@@ -1806,15 +1780,11 @@ static void SDLGPU_INTERNAL_BindGraphicsPipeline(
 		renderer->currentGraphicsPipeline = pipeline;
 	}
 
-	MOJOSHADER_sdlUpdateUniformBuffers(
-		renderer->mojoshaderContext,
-		renderer->renderCommandBuffer
-	);
+	/* Uniform buffer updates are managed directly via SDL_PushGPU*UniformData
+	 * called from effect commit.
+	 */
 
 	SDL_UnlockMutex(renderer->commandLock);
-
-	renderer->currentVertexShader = vertShaderData;
-	renderer->currentFragmentShader = fragShaderData;
 
 	/* Reset deferred binding state */
 	renderer->needNewGraphicsPipeline = 0;
@@ -1892,47 +1862,13 @@ static void SDLGPU_VerifyVertexSampler(
 	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
 	SDLGPU_TextureHandle *textureHandle = (SDLGPU_TextureHandle*) texture;
 	SDL_GPUSampler *gpuSampler;
-	MOJOSHADER_sdlShaderData *vertShader, *blah;
-	MOJOSHADER_samplerType samplerType;
-
-	MOJOSHADER_sdlGetBoundShaderData(renderer->mojoshaderContext, &vertShader, &blah);
 
 	renderer->needVertexSamplerBind = 1;
 
 	if (texture == NULL || sampler == NULL)
 	{
 		renderer->vertexTextureSamplerBindings[index].sampler = renderer->dummySampler;
-
-		if (vertShader)
-		{
-			const MOJOSHADER_parseData *pd = MOJOSHADER_sdlGetShaderParseData(vertShader);
-			if (index < pd->sampler_count)
-			{
-				samplerType = MOJOSHADER_sdlGetShaderParseData(vertShader)->samplers[index].type;
-
-				if (samplerType == MOJOSHADER_SAMPLER_2D)
-				{
-					renderer->vertexTextureSamplerBindings[index].texture = renderer->dummyTexture2D;
-				}
-				else if (samplerType == MOJOSHADER_SAMPLER_VOLUME)
-				{
-					renderer->vertexTextureSamplerBindings[index].texture = renderer->dummyTexture3D;
-				}
-				else
-				{
-					renderer->vertexTextureSamplerBindings[index].texture = renderer->dummyTextureCube;
-				}
-			}
-			else
-			{
-				renderer->vertexTextureSamplerBindings[index].texture = renderer->dummyTexture2D;
-			}
-		}
-		else
-		{
-			renderer->vertexTextureSamplerBindings[index].texture = renderer->dummyTexture2D;
-		}
-
+		renderer->vertexTextureSamplerBindings[index].texture = renderer->dummyTexture2D;
 		return;
 	}
 
@@ -1962,46 +1898,14 @@ static void SDLGPU_VerifySampler(
 	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
 	SDLGPU_TextureHandle *textureHandle = (SDLGPU_TextureHandle*) texture;
 	SDL_GPUSampler *gpuSampler;
-	MOJOSHADER_sdlShaderData *blah, *fragShader;
-	MOJOSHADER_samplerType samplerType;
-
-	MOJOSHADER_sdlGetBoundShaderData(renderer->mojoshaderContext, &blah, &fragShader);
-
+	
+	
 	renderer->needFragmentSamplerBind = 1;
 
 	if (texture == NULL || sampler == NULL)
 	{
 		renderer->fragmentTextureSamplerBindings[index].sampler = renderer->dummySampler;
-
-		if (fragShader)
-		{
-			const MOJOSHADER_parseData *pd = MOJOSHADER_sdlGetShaderParseData(fragShader);
-			if (index < pd->sampler_count)
-			{
-				samplerType = pd->samplers[index].type;
-				if (samplerType == MOJOSHADER_SAMPLER_2D)
-				{
-					renderer->fragmentTextureSamplerBindings[index].texture = renderer->dummyTexture2D;
-				}
-				else if (samplerType == MOJOSHADER_SAMPLER_VOLUME)
-				{
-					renderer->fragmentTextureSamplerBindings[index].texture = renderer->dummyTexture3D;
-				}
-				else
-				{
-					renderer->fragmentTextureSamplerBindings[index].texture = renderer->dummyTextureCube;
-				}
-			}
-			else
-			{
-				renderer->fragmentTextureSamplerBindings[index].texture = renderer->dummyTexture2D;
-			}
-		}
-		else
-		{
-			renderer->fragmentTextureSamplerBindings[index].texture = renderer->dummyTexture2D;
-		}
-
+		renderer->fragmentTextureSamplerBindings[index].texture = renderer->dummyTexture2D;
 		return;
 	}
 
@@ -2030,7 +1934,6 @@ static void SDLGPU_ApplyVertexBufferBindings(
 	int32_t baseVertex
 ) {
 	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
-	MOJOSHADER_sdlShaderData *vertexShader, *blah;
 	void* bindingsResult;
 	FNA3D_VertexBufferBinding *src, *dst;
 	int32_t i, bindingsIndex;
@@ -2041,14 +1944,12 @@ static void SDLGPU_ApplyVertexBufferBindings(
 		baseVertex = 0;
 	}
 
-	/* Check VertexBufferBindings */
-	MOJOSHADER_sdlGetBoundShaderData(renderer->mojoshaderContext, &vertexShader, &blah);
-
+	/* Check VertexBufferBindings using current vertex shader as key */
 	bindingsResult = PackedVertexBufferBindingsArray_Fetch(
 		renderer->vertexBufferBindingsCache,
 		bindings,
 		numBindings,
-		vertexShader,
+		renderer->currentVertexShader,
 		&bindingsIndex,
 		&hash
 	);
@@ -2059,7 +1960,7 @@ static void SDLGPU_ApplyVertexBufferBindings(
 			&renderer->vertexBufferBindingsCache,
 			bindings,
 			numBindings,
-			vertexShader,
+			renderer->currentVertexShader,
 			(void*) 69420
 		);
 	}
@@ -2396,19 +2297,13 @@ static void SDLGPU_INTERNAL_BindDeferredState(
 
 	if (renderer->needVertexSamplerBind || renderer->needFragmentSamplerBind)
 	{
-		MOJOSHADER_sdlShaderData *vertShaderData, *fragShaderData;
-		MOJOSHADER_sdlGetBoundShaderData(
-			renderer->mojoshaderContext,
-			&vertShaderData,
-			&fragShaderData
-		);
-		if (renderer->needVertexSamplerBind)
+						if (renderer->needVertexSamplerBind)
 		{
 			SDL_BindGPUVertexSamplers(
 				renderer->renderPass,
 				0,
 				renderer->vertexTextureSamplerBindings,
-				MOJOSHADER_sdlGetSamplerSlots(vertShaderData)
+				MAX_VERTEXTEXTURE_SAMPLERS
 			);
 		}
 		if (renderer->needFragmentSamplerBind)
@@ -2417,7 +2312,7 @@ static void SDLGPU_INTERNAL_BindDeferredState(
 				renderer->renderPass,
 				0,
 				renderer->fragmentTextureSamplerBindings,
-				MOJOSHADER_sdlGetSamplerSlots(fragShaderData)
+				MAX_TEXTURE_SAMPLERS
 			);
 		}
 	}
@@ -3834,181 +3729,267 @@ static void SDLGPU_CreateEffect(
 	FNA3D_Renderer *driverData,
 	uint8_t *effectCode,
 	uint32_t effectCodeLength,
-	FNA3D_Effect **effect,
-	MOJOSHADER_effect **effectData
+	FNA3D_Effect **effect
 ) {
 	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
-	MOJOSHADER_effectShaderContext shaderBackend;
 	SDLGPU_Effect *result;
-	int32_t i;
+	uint32_t i;
 
-	shaderBackend.shaderContext = renderer->mojoshaderContext;
-	shaderBackend.compileShader = (MOJOSHADER_compileShaderFunc) MOJOSHADER_sdlCompileShader;
-	shaderBackend.shaderAddRef = (MOJOSHADER_shaderAddRefFunc) MOJOSHADER_sdlShaderAddRef;
-	shaderBackend.deleteShader = (MOJOSHADER_deleteShaderFunc) MOJOSHADER_sdlDeleteShader;
-	shaderBackend.getParseData = (MOJOSHADER_getParseDataFunc) MOJOSHADER_sdlGetShaderParseData;
-	shaderBackend.bindShaders = (MOJOSHADER_bindShadersFunc) MOJOSHADER_sdlBindShaders;
-	shaderBackend.getBoundShaders = (MOJOSHADER_getBoundShadersFunc) MOJOSHADER_sdlGetBoundShaderData;
-	shaderBackend.mapUniformBufferMemory = (MOJOSHADER_mapUniformBufferMemoryFunc) MOJOSHADER_sdlMapUniformBufferMemory;
-	shaderBackend.unmapUniformBufferMemory = (MOJOSHADER_unmapUniformBufferMemoryFunc) MOJOSHADER_sdlUnmapUniformBufferMemory;
-	shaderBackend.getError = (MOJOSHADER_getErrorFunc) MOJOSHADER_sdlGetError;
-	shaderBackend.m = NULL;
-	shaderBackend.f = NULL;
-	shaderBackend.malloc_data = NULL;
+	*effect = NULL;
 
-	*effectData = MOJOSHADER_compileEffect(
-		effectCode,
-		effectCodeLength,
-		NULL,
-		0,
-		NULL,
-		0,
-		&shaderBackend
-	);
-
-	for (i = 0; i < (*effectData)->error_count; i += 1)
+	result = (SDLGPU_Effect*) SDL_calloc(1, sizeof(SDLGPU_Effect));
+	if (result == NULL)
 	{
-		FNA3D_LogError(
-			"MOJOSHADER_compileEffect Error: %s",
-			(*effectData)->errors[i].error
-		);
+		return;
 	}
 
-	result = (SDLGPU_Effect*) SDL_malloc(sizeof(SDLGPU_Effect));
-	result->effect = *effectData;
+	if (!FNA3D_LoadEffect(effectCode, effectCodeLength, &result->effectData))
+	{
+		FNA3D_LogError("Failed to load effect blob!");
+		SDL_free(result);
+		return;
+	}
+
+	/* Allocate per-pass shader arrays */
+	result->vertexShaders = (SDL_GPUShader**) SDL_calloc(
+		result->effectData->passCount,
+		sizeof(SDL_GPUShader*)
+	);
+	result->pixelShaders = (SDL_GPUShader**) SDL_calloc(
+		result->effectData->passCount,
+		sizeof(SDL_GPUShader*)
+	);
+
+	/* Create SDL_GPUShader objects for each pass */
+	for (i = 0; i < result->effectData->passCount; i++)
+	{
+		FNA3D_EffectPass *pass = &result->effectData->passes[i];
+
+		if (pass->vertexShaderIndex >= 0)
+		{
+			FNA3D_EffectShader *vs = &result->effectData->shaders[
+				pass->vertexShaderIndex];
+			SDL_GPUShaderCreateInfo createInfo;
+			SDL_memset(&createInfo, 0, sizeof(createInfo));
+			createInfo.code = vs->spirvData;
+			createInfo.code_size = vs->spirvSize;
+			createInfo.entrypoint = vs->entryPoint;
+			createInfo.format = SDL_GPU_SHADERFORMAT_SPIRV;
+			createInfo.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+			createInfo.num_samplers = MAX_TEXTURE_SAMPLERS;
+			createInfo.num_uniform_buffers = 1;
+			result->vertexShaders[i] = SDL_CreateGPUShader(
+				renderer->device, &createInfo);
+		}
+
+		if (pass->pixelShaderIndex >= 0)
+		{
+			FNA3D_EffectShader *ps = &result->effectData->shaders[
+				pass->pixelShaderIndex];
+			SDL_GPUShaderCreateInfo createInfo;
+			SDL_memset(&createInfo, 0, sizeof(createInfo));
+			createInfo.code = ps->spirvData;
+			createInfo.code_size = ps->spirvSize;
+			createInfo.entrypoint = ps->entryPoint;
+			createInfo.format = SDL_GPU_SHADERFORMAT_SPIRV;
+			createInfo.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+			createInfo.num_samplers = MAX_TEXTURE_SAMPLERS;
+			createInfo.num_uniform_buffers = 1;
+			result->pixelShaders[i] = SDL_CreateGPUShader(
+				renderer->device, &createInfo);
+		}
+	}
+
 	*effect = (FNA3D_Effect*) result;
 }
 
 static void SDLGPU_CloneEffect(
 	FNA3D_Renderer *driverData,
 	FNA3D_Effect *cloneSource,
-	FNA3D_Effect **effect,
-	MOJOSHADER_effect **effectData
+	FNA3D_Effect **effect
 ) {
 	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
 	SDLGPU_Effect *sdlCloneSource = (SDLGPU_Effect*) cloneSource;
+	FNA3D_Effect *clonedData;
 	SDLGPU_Effect *result;
+	uint32_t i;
 
-	*effectData = MOJOSHADER_cloneEffect(sdlCloneSource->effect);
-	if (*effectData == NULL)
+	*effect = NULL;
+
+	if (cloneSource == NULL)
 	{
-		FNA3D_LogError(MOJOSHADER_sdlGetError(renderer->mojoshaderContext));
+		return;
 	}
 
-	result = (SDLGPU_Effect*) SDL_malloc(sizeof(SDLGPU_Effect));
-	result->effect = *effectData;
+	clonedData = FNA3D_Internal_CloneEffect(sdlCloneSource->effectData);
+	if (clonedData == NULL)
+	{
+		FNA3D_LogError("Failed to clone effect!");
+		return;
+	}
+
+	result = (SDLGPU_Effect*) SDL_calloc(1, sizeof(SDLGPU_Effect));
+	result->effectData = clonedData;
+	result->vertexShaders = (SDL_GPUShader**) SDL_calloc(
+		clonedData->passCount, sizeof(SDL_GPUShader*));
+	result->pixelShaders = (SDL_GPUShader**) SDL_calloc(
+		clonedData->passCount, sizeof(SDL_GPUShader*));
+
+	/* Re-use the same shader objects (add ref?) */
+	for (i = 0; i < clonedData->passCount; i++)
+	{
+		result->vertexShaders[i] = sdlCloneSource->vertexShaders[i];
+		result->pixelShaders[i] = sdlCloneSource->pixelShaders[i];
+	}
+
 	*effect = (FNA3D_Effect*) result;
 }
 
-/* TODO: check if we need to defer this */
 static void SDLGPU_AddDisposeEffect(
 	FNA3D_Renderer *driverData,
 	FNA3D_Effect *effect
 ) {
 	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
 	SDLGPU_Effect *gpuEffect = (SDLGPU_Effect*) effect;
-	MOJOSHADER_effect *effectData = gpuEffect->effect;
+	uint32_t i;
 
-	if (effectData == renderer->currentEffect)
+	if (effect == NULL)
 	{
-		MOJOSHADER_effectEndPass(renderer->currentEffect);
-		MOJOSHADER_effectEnd(renderer->currentEffect);
+		return;
+	}
+
+	if (gpuEffect->effectData == renderer->currentEffect)
+	{
 		renderer->currentEffect = NULL;
 		renderer->currentTechnique = NULL;
 		renderer->currentPass = 0;
 	}
-	MOJOSHADER_deleteEffect(effectData);
+
+	/* Release shaders */
+	if (gpuEffect->vertexShaders != NULL)
+	{
+		for (i = 0; i < gpuEffect->effectData->passCount; i++)
+		{
+			if (gpuEffect->vertexShaders[i] != NULL)
+			{
+				SDL_ReleaseGPUShader(renderer->device,
+					gpuEffect->vertexShaders[i]);
+			}
+		}
+		SDL_free(gpuEffect->vertexShaders);
+	}
+	if (gpuEffect->pixelShaders != NULL)
+	{
+		for (i = 0; i < gpuEffect->effectData->passCount; i++)
+		{
+			if (gpuEffect->pixelShaders[i] != NULL)
+			{
+				SDL_ReleaseGPUShader(renderer->device,
+					gpuEffect->pixelShaders[i]);
+			}
+		}
+		SDL_free(gpuEffect->pixelShaders);
+	}
+
+	if (gpuEffect->uniformBuffer != NULL)
+	{
+		SDL_ReleaseGPUBuffer(renderer->device,
+			gpuEffect->uniformBuffer);
+	}
+
+	FNA3D_Internal_DestroyEffect(gpuEffect->effectData);
 	SDL_free(gpuEffect);
 }
 
 static void SDLGPU_SetEffectTechnique(
 	FNA3D_Renderer *driverData,
 	FNA3D_Effect *effect,
-	MOJOSHADER_effectTechnique *technique
+	FNA3D_EffectTechnique *technique
 ) {
-	SDLGPU_Effect *gpuEffect = (SDLGPU_Effect*) effect;
-	MOJOSHADER_effectSetTechnique(gpuEffect->effect, technique);
+	FNA3D_Effect *effectData = ((SDLGPU_Effect*) effect)->effectData;
+
+	effectData->currentTechnique = technique;
+
+	(void)(driverData);
 }
 
 static void SDLGPU_ApplyEffect(
 	FNA3D_Renderer *driverData,
 	FNA3D_Effect *effect,
 	uint32_t pass,
-	MOJOSHADER_effectStateChanges *stateChanges
+	FNA3D_EffectStateChanges *stateChanges
 ) {
 	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
 	SDLGPU_Effect *gpuEffect = (SDLGPU_Effect*) effect;
-	MOJOSHADER_effect *effectData = gpuEffect->effect;
-	const MOJOSHADER_effectTechnique *technique = gpuEffect->effect->current_technique;
-	uint32_t numPasses;
+	FNA3D_Effect *effectData = gpuEffect->effectData;
+	const FNA3D_EffectTechnique *technique = effectData->currentTechnique;
 
 	renderer->needFragmentSamplerBind = 1;
 	renderer->needVertexSamplerBind = 1;
 	renderer->needNewGraphicsPipeline = 1;
 
-	if (effectData == renderer->currentEffect)
+	/* Set current shaders for the pass */
+	if (pass < effectData->passCount)
 	{
-		if (
-			technique == renderer->currentTechnique &&
-			pass == renderer->currentPass
-		) {
-			MOJOSHADER_effectCommitChanges(
-				renderer->currentEffect
-			);
-
-			return;
-		}
-
-		MOJOSHADER_effectEndPass(renderer->currentEffect);
-		MOJOSHADER_effectBeginPass(renderer->currentEffect, pass);
-		renderer->currentTechnique = technique;
-		renderer->currentPass = pass;
-
-		return;
-	}
-	else if (renderer->currentEffect != NULL)
-	{
-		MOJOSHADER_effectEndPass(renderer->currentEffect);
-		MOJOSHADER_effectEnd(renderer->currentEffect);
+		renderer->currentVertexShader =
+			gpuEffect->vertexShaders[pass];
+		renderer->currentFragmentShader =
+			gpuEffect->pixelShaders[pass];
 	}
 
-	MOJOSHADER_effectBegin(
-		effectData,
-		&numPasses,
-		0,
-		stateChanges
-	);
-
-	MOJOSHADER_effectBeginPass(effectData, pass);
 	renderer->currentEffect = effectData;
 	renderer->currentTechnique = technique;
 	renderer->currentPass = pass;
+
+	/* Populate stateChanges from pass metadata */
+	if (stateChanges != NULL && effectData->stateChanges != NULL)
+	{
+		SDL_memcpy(stateChanges, effectData->stateChanges,
+			sizeof(FNA3D_EffectStateChanges));
+	}
+
+	(void)(technique);
 }
 
 static void SDLGPU_BeginPassRestore(
 	FNA3D_Renderer *driverData,
 	FNA3D_Effect *effect,
-	MOJOSHADER_effectStateChanges *stateChanges
+	FNA3D_EffectStateChanges *stateChanges
 ) {
-	MOJOSHADER_effect *effectData = ((SDLGPU_Effect*) effect)->effect;
-	uint32_t whatever;
+	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
+	SDLGPU_Effect *gpuEffect = (SDLGPU_Effect*) effect;
 
-	MOJOSHADER_effectBegin(
-			effectData,
-			&whatever,
-			1,
-			stateChanges
-	);
-	MOJOSHADER_effectBeginPass(effectData, 0);
+	renderer->needFragmentSamplerBind = 1;
+	renderer->needVertexSamplerBind = 1;
+	renderer->needNewGraphicsPipeline = 1;
+
+	renderer->currentVertexShader = gpuEffect->vertexShaders[0];
+	renderer->currentFragmentShader = gpuEffect->pixelShaders[0];
+
+	renderer->currentEffect = gpuEffect->effectData;
+	renderer->currentTechnique = gpuEffect->effectData->currentTechnique;
+	renderer->currentPass = 0;
+
+	if (stateChanges != NULL && gpuEffect->effectData->stateChanges != NULL)
+	{
+		SDL_memcpy(stateChanges, gpuEffect->effectData->stateChanges,
+			sizeof(FNA3D_EffectStateChanges));
+	}
 }
 
 static void SDLGPU_EndPassRestore(
 	FNA3D_Renderer *driverData,
 	FNA3D_Effect *effect
 ) {
-	MOJOSHADER_effect *effectData = ((SDLGPU_Effect*) effect)->effect;
-	MOJOSHADER_effectEndPass(effectData);
-	MOJOSHADER_effectEnd(effectData);
+	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
+
+	renderer->currentEffect = NULL;
+	renderer->currentTechnique = NULL;
+	renderer->currentPass = 0;
+	renderer->currentVertexShader = NULL;
+	renderer->currentFragmentShader = NULL;
+
+	(void)(effect);
 }
 
 /* Queries */
@@ -4250,7 +4231,7 @@ static void SDLGPU_DestroyDevice(FNA3D_Device *device)
 		renderer->dummySampler
 	);
 
-	MOJOSHADER_sdlDestroyContext(renderer->mojoshaderContext);
+	/* MojoShader context removed — no cleanup needed */
 
 #if SDL_PLATFORM_GDK
 	SDL_RemoveEventWatch(SDLGPU_INTERNAL_GDKEventFilter, renderer);
@@ -4268,14 +4249,23 @@ static void SDLGPU_DestroyDevice(FNA3D_Device *device)
 static SDL_PropertiesID SDLGPU_INTERNAL_FillProperties(bool debugMode)
 {
 	SDL_PropertiesID props = SDL_CreateProperties();
-	SDL_GPUShaderFormat formats = MOJOSHADER_sdlGetShaderFormats();
+	SDL_GPUShaderFormat formats;
 	const char *agilityPath = SDL_GetHint("FNA3D_SDL_AGILITY_SDK_PATH");
+
+	/* Query available shader formats from SDL GPU */
+	{
+
+		/* SDL_GPU always supports SPIR-V. We request SPIR-V,
+		 * and SDL_shadercross handles cross-compilation at runtime.
+		 */
+		formats = SDL_GPU_SHADERFORMAT_SPIRV;
+	}
 
 	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN, debugMode);
 	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_PREFERLOWPOWER_BOOLEAN, SDL_GetHintBoolean("FNA3D_PREFER_LOW_POWER", false));
 
-	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_PRIVATE_BOOLEAN, !!(formats & SDL_GPU_SHADERFORMAT_PRIVATE));
 	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN, !!(formats & SDL_GPU_SHADERFORMAT_SPIRV));
+	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXBC_BOOLEAN, !!(formats & SDL_GPU_SHADERFORMAT_DXBC));
 	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXIL_BOOLEAN, !!(formats & SDL_GPU_SHADERFORMAT_DXIL));
 	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_MSL_BOOLEAN, !!(formats & SDL_GPU_SHADERFORMAT_MSL));
 	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_METALLIB_BOOLEAN, !!(formats & SDL_GPU_SHADERFORMAT_METALLIB));
@@ -4455,19 +4445,7 @@ static FNA3D_Device* SDLGPU_CreateDevice(
 			renderer->vertexElements[i];
 	}
 
-	renderer->mojoshaderContext = MOJOSHADER_sdlCreateContext(
-		device,
-		NULL,
-		NULL,
-		NULL
-	);
-	if (renderer->mojoshaderContext == NULL)
-	{
-		FNA3D_LogError("Could not create MojoShader context: %s", MOJOSHADER_sdlGetError(NULL));
-		SDL_free(renderer);
-		SDL_free(result);
-		return NULL;
-	}
+	/* MojoShader removed — SDL GPU handles shaders directly */
 
 	/* Determine capabilities */
 

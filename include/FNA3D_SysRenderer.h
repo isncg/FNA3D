@@ -43,10 +43,6 @@ extern "C" {
 
 typedef enum FNA3D_SysRendererTypeEXT
 {
-	FNA3D_RENDERER_TYPE_OPENGL_EXT,
-	FNA3D_RENDERER_TYPE_VULKAN_EXT, /* REMOVED, DO NOT USE */
-	FNA3D_RENDERER_TYPE_D3D11_EXT,
-	FNA3D_RENDERER_TYPE_METAL_EXT, /* REMOVED, DO NOT USE */
 	FNA3D_RENDERER_TYPE_SDL_GPU_EXT,
 } FNA3D_SysRendererTypeEXT;
 
@@ -57,35 +53,6 @@ typedef struct FNA3D_SysRendererEXT
 
 	union
 	{
-#if FNA3D_DRIVER_D3D11
-		struct
-		{
-			void *device; 	/* ID3D11Device */
-			void *context;	/* ID3D11DeviceContext */
-		} d3d11;
-#endif /* FNA3D_DRIVER_D3D11 */
-#if FNA3D_DRIVER_METAL
-		struct
-		{
-			void *device;	/* MTLDevice */
-			void *view;	/* SDL_MetalView */
-		} metal;
-#endif /* FNA3D_DRIVER_METAL */
-#if FNA3D_DRIVER_OPENGL
-		struct
-		{
-			void *context; /* SDL_GLContext */
-		} opengl;
-#endif /* FNA3D_DRIVER_OPENGL */
-#if FNA3D_DRIVER_VULKAN
-		struct
-		{
-			VkInstance instance;
-			VkPhysicalDevice physicalDevice;
-			VkDevice logicalDevice;
-			uint32_t queueFamilyIndex;
-		} vulkan;
-#endif /* FNA3D_DRIVER_VULKAN */
 		uint8_t filler[64];
 	} renderer;
 } FNA3D_SysRendererEXT;
@@ -97,40 +64,6 @@ typedef struct FNA3D_SysTextureEXT
 
 	union
 	{
-#if FNA3D_DRIVER_D3D11
-		struct
-		{
-			void *handle;		/* ID3D11Resource* */
-			void *shaderView;	/* ID3D11ShaderResourceView* */
-		} d3d11;
-#endif /* FNA3D_DRIVER_D3D11 */
-#if FNA3D_DRIVER_METAL
-		struct
-		{
-			void *handle; /* MTLTexture */
-		} metal;
-#endif /* FNA3D_DRIVER_METAL */
-#if FNA3D_DRIVER_OPENGL
-		struct
-		{
-			uint32_t handle;
-			uint32_t target; /* GLenum */
-		} opengl;
-#endif /* FNA3D_DRIVER_OPENGL */
-#if FNA3D_DRIVER_VULKAN
-
-#if defined(__LP64__) || defined(_WIN64) || defined(__x86_64__) || defined(_M_X64) || defined(__ia64) || defined (_M_IA64) || defined(__aarch64__) || defined(__powerpc64__)
-#define FNA3D_VULKAN_HANDLE_TYPE void*
-#else
-#define FNA3D_VULKAN_HANDLE_TYPE uint64_t
-#endif
-
-		struct
-		{
-			FNA3D_VULKAN_HANDLE_TYPE image;	/* VkImage */
-			FNA3D_VULKAN_HANDLE_TYPE view;	/* VkImageView */
-		} vulkan;
-#endif /* FNA3D_DRIVER_VULKAN */
 		uint8_t filler[64];
 	} texture;
 } FNA3D_SysTextureEXT;
