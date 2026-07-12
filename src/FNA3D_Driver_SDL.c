@@ -1505,11 +1505,11 @@ static void SDLGPU_INTERNAL_GenerateVertexInputInfo(
 
 			attrUse[usage][index] = 1;
 
-			/* Assign attribute location based on usage + index.
-			 * This convention matches the XNA/HLSL shader input layout
-			 * where semantic (usage) + index determines the location.
+			/* Assign attribute location sequentially to match
+			 * DXC SPIR-V output, which assigns locations in HLSL
+			 * parameter declaration order (0, 1, 2, ...).
 			 */
-			attribLoc = (int32_t) usage * 16 + index;
+			attribLoc = (int32_t) attributeDescriptionCounter;
 
 			attributes[attributeDescriptionCounter].location = attribLoc;
 			attributes[attributeDescriptionCounter].format = XNAToSDL_VertexAttribType[
@@ -4008,24 +4008,10 @@ static void SDLGPU_ApplyEffect(
 				curPass->pixelShaderIndex].uniformBufferCount > 0);
 		}
 
-		SDL_Log("SDLGPU_ApplyEffect: uniformDataSize=%u vsHas=%u psHas=%u "
-			"vsSamplers=%u vsUBOs=%u psSamplers=%u psUBOs=%u",
-			gpuEffect->uniformDataSize,
-			vsHasUniforms, psHasUniforms,
-			(curPass->vertexShaderIndex >= 0
-				? effectData->shaders[curPass->vertexShaderIndex].samplerCount : 0),
-			(curPass->vertexShaderIndex >= 0
-				? effectData->shaders[curPass->vertexShaderIndex].uniformBufferCount : 0),
-			(curPass->pixelShaderIndex >= 0
-				? effectData->shaders[curPass->pixelShaderIndex].samplerCount : 0),
-			(curPass->pixelShaderIndex >= 0
-				? effectData->shaders[curPass->pixelShaderIndex].uniformBufferCount : 0));
 
 		SDL_LockMutex(renderer->commandLock);
 		if (vsHasUniforms)
 		{
-			SDL_Log("  -> Pushing VERTEX uniform data (slot 0, %u bytes)",
-				gpuEffect->uniformDataSize);
 			SDL_PushGPUVertexUniformData(
 				renderer->renderCommandBuffer,
 				0, /* slot 0 */
@@ -4035,8 +4021,6 @@ static void SDLGPU_ApplyEffect(
 		}
 		if (psHasUniforms)
 		{
-			SDL_Log("  -> Pushing FRAGMENT uniform data (slot 0, %u bytes)",
-				gpuEffect->uniformDataSize);
 			SDL_PushGPUFragmentUniformData(
 				renderer->renderCommandBuffer,
 				0, /* slot 0 */
@@ -4046,11 +4030,6 @@ static void SDLGPU_ApplyEffect(
 		}
 		SDL_UnlockMutex(renderer->commandLock);
 		gpuEffect->uniformDirty = 0;
-	}
-	else
-	{
-		SDL_Log("SDLGPU_ApplyEffect: NO uniform data (ptr=%p size=%u)",
-			(void*)gpuEffect->uniformData, gpuEffect->uniformDataSize);
 	}
 
 	(void)(technique);

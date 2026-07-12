@@ -3,6 +3,7 @@
 *.dll
 *.dylib
 .vs/
+.idea/
 obj/
 Debug/
 Release/
