@@ -156,10 +156,14 @@ if(FNA3D_IMGUI)
 	)
 	# C++17 applies only to the C++ sources; C sources keep their gnu99 flags.
 	target_compile_features(FNA3D PRIVATE cxx_std_17)
-	target_include_directories(FNA3D PRIVATE
-		${FNA3D_IMGUI_DIR}
-		${FNA3D_IMGUI_DIR}/backends
-		${DCIMGUI_GEN_DIR}
+	# backends/ is only needed to build FNA3D's own glue.
+	target_include_directories(FNA3D PRIVATE ${FNA3D_IMGUI_DIR}/backends)
+	# Expose imgui.h/imconfig.h and the generated dcimgui.h to consumers, so C
+	# (and C++) callers linking FNA3D can #include "dcimgui.h" for the ImGui
+	# widget API without knowing where the generated files live.
+	target_include_directories(FNA3D PUBLIC
+		$<BUILD_INTERFACE:${FNA3D_IMGUI_DIR}>
+		$<BUILD_INTERFACE:${DCIMGUI_GEN_DIR}>
 	)
 	# FNA3D_IMGUI enables the driver-side hooks; CIMGUI_API exports the dcimgui
 	# C symbols from the shared library (default visibility already exports on
