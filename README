@@ -211,6 +211,12 @@ FNA3D_DestroyDevice(device);
   需改用 C++ 链接器或补 `-lstdc++`。
 - **单窗口**：ImGui 用 `CreateDevice` 时的窗口及其 swapchain 格式初始化；本期未支持
   docking / multi-viewport。
+- **depth clip 补丁（重要）**：vendored 的 ImGui SDL_GPU 后端把 `enable_depth_clip`
+  硬编码为 `false`（请求 depth clamp），而 FNA3D 关闭了 `depthClamp` 设备特性，二者
+  不兼容，会触发 `SDL_CreateGPUGraphicsPipeline` 断言。本仓库以**受版本管理的补丁**
+  （`patches/0001-sdlgpu3-enable-depth-clip.patch`，由 CMake 配置阶段自动幂等应用）
+  将其改为 `true`。原理、影响范围与"何时才真需要 depth clamp"详见
+  [`patches/README.md`](patches/README.md)。**请勿手动删除该补丁。**
 
 最简验证：在任意测试（如 `triangle_test`）里加 `FNA3D_ImGui_InitEXT` + 每帧
 `FNA3D_ImGui_NewFrameEXT` + `ImGui_ShowDemoWindow(NULL)`，即可看到 demo 窗口叠加并响应鼠标。

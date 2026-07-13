@@ -1,0 +1,34 @@
+Subject: [PATCH] ImGui SDL_GPU backend: force enable_depth_clip = true
+
+FNA3D creates its SDL_GPUDevice with the Vulkan depthClamp feature explicitly
+disabled (see FNA3D_Driver_SDL.c: SDL.gpu.device.create.feature.depth_clamping
+= false, for portability to older/mobile devices). Per SDL's docs, when
+depth_clamping is disabled the device has no depth-clamp support and
+SDL_GPURasterizerState.enable_depth_clip must ALWAYS be true; otherwise
+SDL_CreateGPUGraphicsPipeline asserts:
+
+    Rasterizer state enable_depth_clip must be set to true
+    (FEATURE_DEPTH_CLAMPING disabled)
+
+The vendored imgui_impl_sdlgpu3 backend hardcodes enable_depth_clip = false
+(i.e. "use depth clamp"), which is only valid on a device that kept depthClamp
+enabled. That trips the assertion on every FNA3D device. Depth clip vs clamp is
+irrelevant to ImGui's 2D geometry (rendered with the depth test off), so forcing
+true is correct and portable.
+
+This lives as a tracked patch (applied at configure time by CMake) so the fix
+survives `git submodule update` without carrying a fork of the imgui submodule.
+
+diff --git a/backends/imgui_impl_sdlgpu3.cpp b/backends/imgui_impl_sdlgpu3.cpp
+index 8f0408c82..ba6772b12 100644
+--- a/backends/imgui_impl_sdlgpu3.cpp
++++ b/backends/imgui_impl_sdlgpu3.cpp
+@@ -538,7 +538,7 @@ static void ImGui_ImplSDLGPU3_CreateGraphicsPipeline()
+     rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+     rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+     rasterizer_state.enable_depth_bias = false;
+-    rasterizer_state.enable_depth_clip = false;
++    rasterizer_state.enable_depth_clip = true;
+
+     SDL_GPUMultisampleState multisample_state = {};
+     multisample_state.sample_count = v->MSAASamples;

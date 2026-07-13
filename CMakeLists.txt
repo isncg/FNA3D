@@ -128,6 +128,42 @@ if(FNA3D_IMGUI)
 	set(DEAR_BINDINGS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/dear_bindings)
 	set(DCIMGUI_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
+	# Apply tracked patches to the vendored imgui submodule at configure time.
+	# These live in patches/ (rather than a submodule fork) so they survive
+	# `git submodule update`. Re-application is idempotent: `git apply --reverse
+	# --check` succeeds only when the patch is already present, so we skip it.
+	find_package(Git QUIET)
+	set(FNA3D_IMGUI_PATCHES
+		${CMAKE_CURRENT_SOURCE_DIR}/patches/0001-sdlgpu3-enable-depth-clip.patch
+	)
+	if(Git_FOUND)
+		foreach(_patch ${FNA3D_IMGUI_PATCHES})
+			get_filename_component(_patch_name ${_patch} NAME)
+			execute_process(
+				COMMAND ${GIT_EXECUTABLE} apply --reverse --check ${_patch}
+				WORKING_DIRECTORY ${FNA3D_IMGUI_DIR}
+				RESULT_VARIABLE _patch_applied
+				OUTPUT_QUIET ERROR_QUIET
+			)
+			if(NOT _patch_applied EQUAL 0)
+				execute_process(
+					COMMAND ${GIT_EXECUTABLE} apply ${_patch}
+					WORKING_DIRECTORY ${FNA3D_IMGUI_DIR}
+					RESULT_VARIABLE _patch_result
+				)
+				if(NOT _patch_result EQUAL 0)
+					message(FATAL_ERROR "Failed to apply imgui patch: ${_patch_name}")
+				endif()
+				message(STATUS "Applied imgui patch: ${_patch_name}")
+			else()
+				message(STATUS "imgui patch already applied: ${_patch_name}")
+			endif()
+		endforeach()
+	else()
+		message(WARNING "git not found; cannot apply imgui patches in patches/ "
+			"(ImGui may assert on enable_depth_clip with FNA3D devices)")
+	endif()
+
 	# Generate the flat C bindings (dcimgui.{h,cpp,json}) from imgui.h.
 	add_custom_command(
 		OUTPUT
