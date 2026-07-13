@@ -110,6 +110,9 @@ ninja -C build
 
 # 静态库
 cmake -B build -G Ninja . -DBUILD_SHARED_LIBS=OFF
+
+# 关闭 Dear ImGui 集成（默认 ON，见下文）
+cmake -B build -G Ninja . -DFNA3D_IMGUI=OFF
 ```
 
 ## 测试
@@ -136,6 +139,81 @@ int32_t passes = FNA3D_GetTechniquePassCount(tech);
 ```
 
 不再需要 `mojoshader.h`。加载 `.feb` 后即可直接使用上述 API 获取所有元数据。
+
+## Dear ImGui 集成（可选，`FNA3D_IMGUI`，默认 ON）
+
+FNA3D 可将 [Dear ImGui](https://github.com/ocornut/imgui) 直接编译进输出库，让本库的
+使用者（C 或 C# via P/Invoke）无需接触 SDL_GPU 即可绘制 ImGui 叠加界面。
+
+- ImGui 的 **SDL3 + SDL_GPU 后端由 FNA3D 内部驱动**，只对外暴露少量生命周期函数。
+- 通过 [dear_bindings](https://github.com/dearimgui/dear_bindings) 生成扁平 C ABI
+  (`dcimgui`)，把完整 ImGui 控件 API 以 `extern "C"` 的 `ImGui_*` 符号导出，供 C /
+  C# P/Invoke 调用。
+- 关闭 `FNA3D_IMGUI` 时，库退回**纯 C**（不链接 libstdc++、无 ImGui 符号），
+  `FNA3D_ImGui_*EXT` 变为安全空操作。
+
+子模块位于 `thirdparty/imgui`、`thirdparty/dear_bindings`。**构建期需要 `python3` +
+`ply`**（运行 dear_bindings 生成绑定）；不想要该依赖就配置 `-DFNA3D_IMGUI=OFF`。
+
+### 头文件
+
+链接 `FNA3D` 的目标会自动继承 imgui 与生成目录的包含路径（无需手动配置），直接：
+
+```c
+#include <FNA3D.h>
+#include <FNA3D_ImGui.h>   /* 生命周期：FNA3D_ImGui_*EXT，opt-in 头，需显式包含 */
+#include "dcimgui.h"       /* ImGui 控件 API：ImGui_Begin / ImGui_Text / ... */
+```
+
+`dcimgui.h` 由本库构建时生成（`build/generated/dcimgui.h`），是 C 兼容的；同时安装
+`dcimgui.json`，C# 侧可据此生成完全匹配的 P/Invoke 绑定（或用 Hexa.NET.ImGui）。
+
+### 每帧调用顺序
+
+```c
+FNA3D_CreateDevice(...);
+FNA3D_ImGui_InitEXT(device);          /* 一次，必须在 CreateDevice 之后 */
+
+/* ---- 每帧 ---- */
+FNA3D_ImGui_NewFrameEXT(device);      /* 先调用，再构建 UI */
+ImGui_ShowDemoWindow(NULL);           /* 或自定义 ImGui_Begin(...) / ... / ImGui_End() */
+FNA3D_Clear(...);                     /* 你的正常绘制 */
+/* ... 绘制场景 ... */
+FNA3D_SwapBuffers(...);               /* ImGui 在此自动叠加渲染到画面上 */
+
+/* ---- 退出 ---- */
+FNA3D_ImGui_ShutdownEXT(device);      /* 必须在 DestroyDevice 之前 */
+FNA3D_DestroyDevice(device);
+```
+
+**必须注意：**
+
+- **不要**自己调 `ImGui_Render()` / `ImGui_EndFrame()`——FNA3D 在 `SwapBuffers` 内部
+  已调用；重复调用会触发 ImGui 断言。
+- **不要**自己 `ImGui_CreateContext()`——`InitEXT` 已创建。你的 `ImGui_*` 调用与
+  FNA3D 共享同一个上下文（都在同一个 `.so` 内，无跨库上下文问题）。
+- ImGui 以 `LOAD` 方式画在已 blit 的 backbuffer 之上，所以 `FNA3D_Clear` + 场景照常
+  显示，ImGui 浮在最上层。
+
+### 输入
+
+`InitEXT` 内部通过 `SDL_AddEventWatch` 自动捕获输入，**无需手动转发 SDL 事件**——但你的
+主循环必须照常 `SDL_PollEvent` / `SDL_PumpEvents`（watch 在 pump 时触发）。如需手动接管，
+可用 `FNA3D_ImGui_ProcessEventEXT(device, &event)`，但不要与内置 watch 同时使用（会重复
+处理事件）。
+
+### 注意事项
+
+- **线程**：所有 FNA3D 与 ImGui 调用须在同一线程（即 pump 事件、调 `SwapBuffers` 的主线程）。
+- **共享库 vs 静态库**：链接共享库 `libFNA3D.so` 时，C 可执行文件无需显式链接 C++
+  运行时（`.so` 自带 `libstdc++` 依赖，运行时自动加载）。但若用
+  `-DBUILD_SHARED_LIBS=OFF -DFNA3D_IMGUI=ON` 构建静态库，C 程序会因 C++ 符号链接失败，
+  需改用 C++ 链接器或补 `-lstdc++`。
+- **单窗口**：ImGui 用 `CreateDevice` 时的窗口及其 swapchain 格式初始化；本期未支持
+  docking / multi-viewport。
+
+最简验证：在任意测试（如 `triangle_test`）里加 `FNA3D_ImGui_InitEXT` + 每帧
+`FNA3D_ImGui_NewFrameEXT` + `ImGui_ShowDemoWindow(NULL)`，即可看到 demo 窗口叠加并响应鼠标。
 
 ## 已知限制
 
