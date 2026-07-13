@@ -36,6 +36,26 @@
 #define MAX_UPLOAD_CYCLE_COUNT 4
 #define TRANSFER_BUFFER_SIZE 16777216 /* 16 MiB */
 
+#ifdef FNA3D_IMGUI
+/* Dear ImGui glue, implemented in the C++ TU src/FNA3D_ImGui.cpp. Declared up
+ * here so both SDLGPU_SwapBuffers and the SDLGPU_ImGui* entry points see it.
+ */
+extern void FNA3D_INTERNAL_ImGuiInit(
+	SDL_GPUDevice *device,
+	SDL_Window *window,
+	SDL_GPUTextureFormat swapchainFormat
+);
+extern void FNA3D_INTERNAL_ImGuiNewFrame(void);
+extern uint8_t FNA3D_INTERNAL_ImGuiProcessEvent(void *sdlEvent);
+extern void FNA3D_INTERNAL_ImGuiRender(
+	SDL_GPUCommandBuffer *commandBuffer,
+	SDL_GPUTexture *swapchainTexture,
+	uint32_t width,
+	uint32_t height
+);
+extern void FNA3D_INTERNAL_ImGuiShutdown(void);
+#endif /* FNA3D_IMGUI */
+
 static inline SDL_GPUSampleCount XNAToSDL_SampleCount(int32_t sampleCount)
 {
 	if (sampleCount <= 1)
@@ -606,6 +626,10 @@ typedef struct SDLGPU_Renderer
 	SDLGPU_TextureHandle *fauxBackbufferColorTexture;
 	SDLGPU_TextureHandle *fauxBackbufferColorRenderbuffer;
 	SDLGPU_TextureHandle *fauxBackbufferDepthStencil; /* may be NULL */
+
+	/* Dear ImGui */
+
+	uint8_t imguiActive;
 
 	/* Transfer structure */
 
@@ -1203,6 +1227,18 @@ static void SDLGPU_SwapBuffers(
 			renderer->renderCommandBuffer,
 			&blitInfo
 		);
+
+#ifdef FNA3D_IMGUI
+		if (renderer->imguiActive)
+		{
+			FNA3D_INTERNAL_ImGuiRender(
+				renderer->renderCommandBuffer,
+				swapchainTexture,
+				width,
+				height
+			);
+		}
+#endif /* FNA3D_IMGUI */
 	}
 
 	SDLGPU_INTERNAL_FlushCommands(renderer);
@@ -4304,6 +4340,84 @@ static FNA3D_Texture* SDLGPU_CreateSysTexture(
 ) {
 	/* TODO */
 	return NULL;
+}
+
+/* Dear ImGui Integration */
+
+static void SDLGPU_ImGuiInit(FNA3D_Renderer *driverData)
+{
+#ifdef FNA3D_IMGUI
+	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
+	SDL_Window *window;
+
+	if (renderer->imguiActive)
+	{
+		return;
+	}
+	if (renderer->numWindows == 0)
+	{
+		FNA3D_LogError("FNA3D_ImGui_InitEXT: no window has been claimed");
+		return;
+	}
+
+	window = renderer->windows[0];
+	FNA3D_INTERNAL_ImGuiInit(
+		renderer->device,
+		window,
+		SDL_GetGPUSwapchainTextureFormat(renderer->device, window)
+	);
+	renderer->imguiActive = 1;
+#else
+	(void) driverData;
+	FNA3D_LogWarn(
+		"FNA3D was built without FNA3D_IMGUI; ImGui calls are no-ops"
+	);
+#endif /* FNA3D_IMGUI */
+}
+
+static void SDLGPU_ImGuiNewFrame(FNA3D_Renderer *driverData)
+{
+#ifdef FNA3D_IMGUI
+	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
+	if (!renderer->imguiActive)
+	{
+		return;
+	}
+	FNA3D_INTERNAL_ImGuiNewFrame();
+#else
+	(void) driverData;
+#endif /* FNA3D_IMGUI */
+}
+
+static uint8_t SDLGPU_ImGuiProcessEvent(FNA3D_Renderer *driverData, void *sdlEvent)
+{
+#ifdef FNA3D_IMGUI
+	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
+	if (!renderer->imguiActive)
+	{
+		return 0;
+	}
+	return FNA3D_INTERNAL_ImGuiProcessEvent(sdlEvent);
+#else
+	(void) driverData;
+	(void) sdlEvent;
+	return 0;
+#endif /* FNA3D_IMGUI */
+}
+
+static void SDLGPU_ImGuiShutdown(FNA3D_Renderer *driverData)
+{
+#ifdef FNA3D_IMGUI
+	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
+	if (!renderer->imguiActive)
+	{
+		return;
+	}
+	FNA3D_INTERNAL_ImGuiShutdown();
+	renderer->imguiActive = 0;
+#else
+	(void) driverData;
+#endif /* FNA3D_IMGUI */
 }
 
 /* Destroy */

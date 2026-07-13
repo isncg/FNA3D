@@ -712,6 +712,13 @@ struct FNA3D_Device
 		FNA3D_SysTextureEXT *systexture
 	);
 
+	/* Dear ImGui Integration */
+
+	void (*ImGuiInit)(FNA3D_Renderer *driverData);
+	void (*ImGuiNewFrame)(FNA3D_Renderer *driverData);
+	uint8_t (*ImGuiProcessEvent)(FNA3D_Renderer *driverData, void *sdlEvent);
+	void (*ImGuiShutdown)(FNA3D_Renderer *driverData);
+
 	/* Opaque pointer for the Driver */
 	FNA3D_Renderer *driverData;
 };
@@ -795,7 +802,11 @@ struct FNA3D_Device
 	ASSIGN_DRIVER_FUNC(SetStringMarker, name) \
 	ASSIGN_DRIVER_FUNC(SetTextureName, name) \
 	ASSIGN_DRIVER_FUNC(GetSysRenderer, name) \
-	ASSIGN_DRIVER_FUNC(CreateSysTexture, name)
+	ASSIGN_DRIVER_FUNC(CreateSysTexture, name) \
+	ASSIGN_DRIVER_FUNC(ImGuiInit, name) \
+	ASSIGN_DRIVER_FUNC(ImGuiNewFrame, name) \
+	ASSIGN_DRIVER_FUNC(ImGuiProcessEvent, name) \
+	ASSIGN_DRIVER_FUNC(ImGuiShutdown, name)
 
 typedef struct FNA3D_Driver
 {

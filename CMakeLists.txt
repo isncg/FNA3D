@@ -5,6 +5,7 @@ project(FNA3D C)
 
 # Options
 option(BUILD_SHARED_LIBS "Build shared library" ON)
+option(FNA3D_IMGUI "Build the Dear ImGui integration (dcimgui) for C# P/Invoke" ON)
 
 # Version
 SET(LIB_MAJOR_VERSION "27")
@@ -64,8 +65,12 @@ add_library(FNA3D
 )
 
 # Build flags
+# NOTE: keep these C-only so the optional C++ Dear ImGui sources (added below
+# when FNA3D_IMGUI is enabled) are not compiled with -std=gnu99.
 if(NOT MSVC)
-	set_property(TARGET FNA3D PROPERTY COMPILE_FLAGS "-std=gnu99 -Wall -Wno-strict-aliasing -pedantic")
+	target_compile_options(FNA3D PRIVATE
+		$<$<COMPILE_LANGUAGE:C>:-std=gnu99 -Wall -Wno-strict-aliasing -pedantic>
+	)
 endif()
 
 # FNA3D folders as includes, for other targets to consume
@@ -106,6 +111,62 @@ else()
 		message(STATUS "no TARGET SDL3::SDL3, or SDL3, using variables")
 		target_include_directories(FNA3D PUBLIC "$<BUILD_INTERFACE:${SDL3_INCLUDE_DIRS}>")
 		target_link_libraries(FNA3D PUBLIC ${SDL3_LIBRARIES})
+	endif()
+endif()
+
+# Dear ImGui integration (optional)
+#
+# Compiles Dear ImGui (C++), its SDL3 + SDL_GPU backends, the generated dcimgui
+# flat C bindings, and the FNA3D<->ImGui glue directly into the FNA3D library.
+# dcimgui's C ABI is exported so C# can P/Invoke the full ImGui widget API; the
+# backends are driven internally by FNA3D and never exposed to the host.
+if(FNA3D_IMGUI)
+	enable_language(CXX)
+	find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+	set(FNA3D_IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/imgui)
+	set(DEAR_BINDINGS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/dear_bindings)
+	set(DCIMGUI_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+
+	# Generate the flat C bindings (dcimgui.{h,cpp,json}) from imgui.h.
+	add_custom_command(
+		OUTPUT
+			${DCIMGUI_GEN_DIR}/dcimgui.cpp
+			${DCIMGUI_GEN_DIR}/dcimgui.h
+			${DCIMGUI_GEN_DIR}/dcimgui.json
+		COMMAND ${CMAKE_COMMAND} -E make_directory ${DCIMGUI_GEN_DIR}
+		COMMAND ${Python3_EXECUTABLE} ${DEAR_BINDINGS_DIR}/dear_bindings.py
+			-o ${DCIMGUI_GEN_DIR}/dcimgui
+			${FNA3D_IMGUI_DIR}/imgui.h
+		DEPENDS ${FNA3D_IMGUI_DIR}/imgui.h ${DEAR_BINDINGS_DIR}/dear_bindings.py
+		COMMENT "Generating dcimgui C bindings (dear_bindings)"
+		VERBATIM
+	)
+
+	target_sources(FNA3D PRIVATE
+		${FNA3D_IMGUI_DIR}/imgui.cpp
+		${FNA3D_IMGUI_DIR}/imgui_draw.cpp
+		${FNA3D_IMGUI_DIR}/imgui_tables.cpp
+		${FNA3D_IMGUI_DIR}/imgui_widgets.cpp
+		${FNA3D_IMGUI_DIR}/imgui_demo.cpp
+		${FNA3D_IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
+		${FNA3D_IMGUI_DIR}/backends/imgui_impl_sdlgpu3.cpp
+		${DCIMGUI_GEN_DIR}/dcimgui.cpp
+		${CMAKE_CURRENT_SOURCE_DIR}/src/FNA3D_ImGui.cpp
+	)
+	# C++17 applies only to the C++ sources; C sources keep their gnu99 flags.
+	target_compile_features(FNA3D PRIVATE cxx_std_17)
+	target_include_directories(FNA3D PRIVATE
+		${FNA3D_IMGUI_DIR}
+		${FNA3D_IMGUI_DIR}/backends
+		${DCIMGUI_GEN_DIR}
+	)
+	# FNA3D_IMGUI enables the driver-side hooks; CIMGUI_API exports the dcimgui
+	# C symbols from the shared library (default visibility already exports on
+	# ELF/Mach-O, so this only matters on Windows).
+	target_compile_definitions(FNA3D PRIVATE FNA3D_IMGUI)
+	if(WIN32)
+		target_compile_definitions(FNA3D PRIVATE "CIMGUI_API=__declspec(dllexport)")
 	endif()
 endif()
 
@@ -176,5 +237,13 @@ if(BUILD_SHARED_LIBS)
 		EXPORT ${PROJECT_NAME}-targets
 		NAMESPACE ${PROJECT_NAME}::
 		DESTINATION ${FNA3D_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
+	)
+endif()
+
+# Ship dcimgui.json so consumers can generate matching C# P/Invoke bindings.
+if(FNA3D_IMGUI AND BUILD_SHARED_LIBS)
+	install(
+		FILES ${DCIMGUI_GEN_DIR}/dcimgui.json
+		DESTINATION ${FNA3D_INSTALL_INCLUDEDIR}
 	)
 endif()

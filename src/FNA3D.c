@@ -26,6 +26,7 @@
 
 #include "FNA3D_Driver.h"
 #include "FNA3D_Effect.h"
+#include "FNA3D_ImGui.h"
 
 #ifdef USE_SDL3
 #include <SDL3/SDL.h>
@@ -1452,6 +1453,44 @@ FNA3D_Texture* FNA3D_CreateSysTextureEXT(
 		device->driverData,
 		systexture
 	);
+}
+
+/* Dear ImGui Integration */
+
+void FNA3D_ImGui_InitEXT(FNA3D_Device *device)
+{
+	if (device == NULL)
+	{
+		return;
+	}
+	device->ImGuiInit(device->driverData);
+}
+
+void FNA3D_ImGui_NewFrameEXT(FNA3D_Device *device)
+{
+	if (device == NULL)
+	{
+		return;
+	}
+	device->ImGuiNewFrame(device->driverData);
+}
+
+uint8_t FNA3D_ImGui_ProcessEventEXT(FNA3D_Device *device, void *sdlEvent)
+{
+	if (device == NULL)
+	{
+		return 0;
+	}
+	return device->ImGuiProcessEvent(device->driverData, sdlEvent);
+}
+
+void FNA3D_ImGui_ShutdownEXT(FNA3D_Device *device)
+{
+	if (device == NULL)
+	{
+		return;
+	}
+	device->ImGuiShutdown(device->driverData);
 }
 
 /* vim: set noexpandtab shiftwidth=8 tabstop=8: */

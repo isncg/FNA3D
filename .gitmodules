@@ -1,0 +1,6 @@
+[submodule "thirdparty/imgui"]
+	path = thirdparty/imgui
+	url = git@github.com:ocornut/imgui.git
+[submodule "thirdparty/dear_bindings"]
+	path = thirdparty/dear_bindings
+	url = git@github.com:dearimgui/dear_bindings.git

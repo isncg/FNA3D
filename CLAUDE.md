@@ -13,9 +13,37 @@ ninja -C build
 
 # Shared vs static library
 cmake -B build -G Ninja . -DBUILD_SHARED_LIBS=OFF  # static
+
+# Dear ImGui integration is ON by default; disable for a pure-C build
+cmake -B build -G Ninja . -DFNA3D_IMGUI=OFF
 ```
 
 There are no unit tests. Testing is done by building the library and running FNA-based games against it.
+
+## Dear ImGui Integration (optional, `FNA3D_IMGUI`, default ON)
+
+FNA3D can bundle Dear ImGui so the shared library's consumers (notably C# via
+P/Invoke) get an ImGui overlay without touching SDL_GPU. Requires `python3` +
+`ply` at build time (to run dear_bindings). Submodules live under `thirdparty/`:
+
+- `thirdparty/imgui` — Dear ImGui core + `imgui_impl_sdl3` / `imgui_impl_sdlgpu3` backends.
+- `thirdparty/dear_bindings` — generates `dcimgui.{h,cpp,json}` (flat C ABI) from `imgui.h`.
+
+How it fits together (all C++ compiled directly into the FNA3D library):
+- `dcimgui.cpp` exports the full ImGui widget API as `extern "C"` `ImGui_*`
+  symbols (`CIMGUI_API`). This is what C# P/Invokes. `dcimgui.json` is installed
+  so consumers can generate matching bindings (e.g. Hexa.NET.ImGui).
+- `src/FNA3D_ImGui.cpp` is the only C++ TU authored here: `extern "C"`
+  `FNA3D_INTERNAL_ImGui*` helpers that drive the SDL3/SDL_GPU backends using
+  FNA3D's internal `SDL_GPUDevice`/window. An SDL event watch feeds input, so
+  the host does not forward events.
+- The driver renders ImGui inside `SDLGPU_SwapBuffers` (after the faux-backbuffer
+  blit, LOAD render pass on the swapchain) and dispatches lifecycle through the
+  vtable, exposed as `FNA3D_ImGui_*EXT` in the opt-in header
+  `include/FNA3D_ImGui.h`. The existing `FNA3D.h` API is unchanged.
+
+When `FNA3D_IMGUI=OFF` the library is pure C (no libstdc++, no ImGui symbols);
+`FNA3D_ImGui_*EXT` remain as safe no-ops.
 
 ## Architecture
 
