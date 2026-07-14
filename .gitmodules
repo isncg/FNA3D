@@ -4,3 +4,6 @@
 [submodule "thirdparty/dear_bindings"]
 	path = thirdparty/dear_bindings
 	url = git@github.com:dearimgui/dear_bindings.git
+[submodule "thirdparty/imguizmo"]
+	path = thirdparty/imguizmo
+	url = https://github.com/CedricGuillemet/ImGuizmo.git

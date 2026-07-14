@@ -208,7 +208,21 @@ if(FNA3D_IMGUI)
 	if(WIN32)
 		target_compile_definitions(FNA3D PRIVATE "CIMGUI_API=__declspec(dllexport)")
 	endif()
-endif()
+
+		# ImGuizmo (3D gizmo/manipulator extension for ImGui)
+		option(FNA3D_IMGUIZMO "Build the ImGuizmo integration" ON)
+		if(FNA3D_IMGUIZMO)
+			set(FNA3D_IMGUIZMO_DIR ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/imguizmo/src)
+			target_sources(FNA3D PRIVATE
+				${FNA3D_IMGUIZMO_DIR}/ImGuizmo.cpp
+				${CMAKE_CURRENT_SOURCE_DIR}/src/FNA3D_ImGuizmo.cpp
+			)
+			target_include_directories(FNA3D PRIVATE
+				${FNA3D_IMGUIZMO_DIR}
+			)
+			target_compile_definitions(FNA3D PRIVATE FNA3D_IMGUIZMO)
+		endif()
+	endif()
 
 # define install directories
 # on mingw-w64 cross compilation $CMAKE_INSTALL_LIBDIR is set to an absolute
