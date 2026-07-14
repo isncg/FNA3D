@@ -4520,40 +4520,20 @@ static void SDLGPU_DestroyDevice(FNA3D_Device *device)
 static SDL_PropertiesID SDLGPU_INTERNAL_FillProperties(bool debugMode)
 {
 	SDL_PropertiesID props = SDL_CreateProperties();
-	SDL_GPUShaderFormat formats;
-	const char *agilityPath = SDL_GetHint("FNA3D_SDL_AGILITY_SDK_PATH");
-
-	/* Query available shader formats from SDL GPU */
-	{
-
-		/* SDL_GPU always supports SPIR-V. We request SPIR-V,
-		 * and SDL_shadercross handles cross-compilation at runtime.
-		 */
-		formats = SDL_GPU_SHADERFORMAT_SPIRV;
-	}
 
 	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN, debugMode);
 	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_PREFERLOWPOWER_BOOLEAN, SDL_GetHintBoolean("FNA3D_PREFER_LOW_POWER", false));
 
-	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN, !!(formats & SDL_GPU_SHADERFORMAT_SPIRV));
-	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXBC_BOOLEAN, !!(formats & SDL_GPU_SHADERFORMAT_DXBC));
-	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXIL_BOOLEAN, !!(formats & SDL_GPU_SHADERFORMAT_DXIL));
-	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_MSL_BOOLEAN, !!(formats & SDL_GPU_SHADERFORMAT_MSL));
-	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_METALLIB_BOOLEAN, !!(formats & SDL_GPU_SHADERFORMAT_METALLIB));
+	/* SPIR-V only: shaders are consumed natively by the Vulkan
+	 * driver, no runtime cross-compilation. This restricts device
+	 * selection to SPIR-V-capable SDL_GPU backends (i.e. Vulkan).
+	 */
+	SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN, true);
 
 	SDL_SetBooleanProperty(props, "SDL.gpu.device.create.feature.clip_distance", false);
 	SDL_SetBooleanProperty(props, "SDL.gpu.device.create.feature.depth_clamping", false);
 	SDL_SetBooleanProperty(props, "SDL.gpu.device.create.feature.indirect_draw_first_instance", false);
-	SDL_SetBooleanProperty(props, "SDL.gpu.device.create.d3d12.allowtier1resourcebinding", true);
 	SDL_SetBooleanProperty(props, "SDL.gpu.device.create.vulkan.requirehardwareacceleration", true);
-	SDL_SetBooleanProperty(props, "SDL.gpu.device.create.metal.allowmacfamily1", true);
-
-	if (agilityPath == NULL)
-	{
-		agilityPath = ".\\D3D12\\";
-	}
-	SDL_SetStringProperty(props, "SDL.gpu.device.create.d3d12.agility_sdk_path", agilityPath);
-	SDL_SetNumberProperty(props, "SDL.gpu.device.create.d3d12.agility_sdk_version", 619);
 
 	return props;
 }

@@ -63,7 +63,7 @@ FNA3D is a C library implementing the XNA 4.0 Graphics API with SDL_GPU as its s
 
 `src/FNA3D_Effect.c` and `src/FNA3D_Effect.h` implement the FNA3D Effect Binary (FEB) format — a custom binary format bundling effect metadata (techniques, passes, parameters, render states) with pre-compiled SPIR-V shader binaries.
 
-Shader pipeline: **HLSL source → DXC (SPIR-V backend) → FEB binary (SPIR-V + metadata)**. At runtime, FNA3D loads SPIR-V from the FEB, and SDL_shadercross cross-compiles to platform-native formats (DXBC, DXIL, MSL) as needed.
+Shader pipeline: **HLSL source → DXC (SPIR-V backend) → FEB binary (SPIR-V + metadata)**. At runtime, FNA3D loads SPIR-V from the FEB and feeds it directly to `SDL_CreateGPUShader` (`SDL_GPU_SHADERFORMAT_SPIRV`). There is no runtime cross-compilation: device creation requests only the SPIR-V shader format, which restricts SDL_GPU to its Vulkan driver.
 
 The effect binary is self-contained — all strings, metadata, and SPIR-V data are in a single blob with section offsets.
 
@@ -95,7 +95,7 @@ Separate public API (`include/FNA3D_Image.h`) for decoding PNG/JPG/GIF into RGBA
 ## Key Removals (hlsl branch)
 
 The following were removed from the codebase:
-- **MojoShader** — git submodule entirely removed. Shader compilation is now HLSL→DXC→SPIR-V (content pipeline) + SDL_shadercross (runtime cross-compilation)
+- **MojoShader** — git submodule entirely removed. Shader compilation is now HLSL→DXC→SPIR-V (content pipeline); SPIR-V is consumed natively at runtime (Vulkan only, no cross-compilation)
 - **D3D11 backend** — `src/FNA3D_Driver_D3D11.*` deleted
 - **OpenGL backend** — `src/FNA3D_Driver_OpenGL.*` deleted
 - **Tracing subsystem** — `src/FNA3D_Tracing.*`, `replay/`, `dumpspirv/` deleted

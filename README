@@ -11,7 +11,7 @@
 | 渲染后端 | OpenGL / D3D11 / SDL_GPU | **仅 SDL_GPU** |
 | Shader 格式 | .fxb (MojoShader) | **.feb (FNA3D Effect Binary)** |
 | Shader 编译 | fxc / MojoShader | **DXC → SPIR-V** |
-| 运行时 Shader 转换 | 无 | **SDL_shadercross** (SPIR-V → DXBC/DXIL/MSL) |
+| 运行时 Shader 转换 | 无 | **无**（SPIR-V 由 Vulkan 原生消费） |
 | 平台项目 | visualc/, visualc-gdk/, Xcode/ | **全部移除** |
 
 ## Shader 管线
@@ -23,8 +23,7 @@ HLSL 源码 (.hlsl)
       → FEB Builder 打包
         → .feb 文件（FNA3D Effect Binary）
           → FNA3D_CreateEffect() 加载
-            → SDL_shadercross 跨编译为平台原生格式
-              → SDL_GPU 创建 Shader → Pipeline → 绘制
+            → SDL_GPU (Vulkan) 直接消费 SPIR-V，创建 Shader → Pipeline → 绘制
 ```
 
 ### FEB 二进制格式
@@ -77,27 +76,19 @@ Manifest 格式（`.feb.json`）及着色器编写约定详见[测试项目 READ
 
 ## 依赖
 
-- **运行时**：SDL 3.2.0+（唯一依赖）。SDL_GPU 需要系统有 Vulkan / D3D12 / Metal 驱动，否则设备创建失败。
+- **运行时**：SDL 3.2.0+（唯一依赖）。设备创建仅请求 SPIR-V shader 格式，因此 SDL_GPU 实际只会选择 Vulkan 驱动；系统必须有可用的 Vulkan 驱动，否则设备创建失败。
 - **构建时**：DXC（DirectX Shader Compiler），仅用于内容管线将 HLSL 编译为 SPIR-V。FNA3D 本身不依赖 DXC。
 - 不直接调用 C 运行时（所有内存操作通过 SDL_malloc/SDL_free）
 
 ## 支持的平台
 
-SDL_GPU 后端跨平台，通过 Vulkan / D3D12 / Metal 驱动支持：
+本分支为 **Vulkan 单后端**：shader 只以 SPIR-V 形式提供，设备创建只声明 SPIR-V 格式，SDL_GPU 的 D3D12 / Metal 驱动因不消费 SPIR-V 而不会被选中。
 
 | 平台 | 图形驱动 | 状态 |
 |------|---------|------|
 | Linux | Vulkan (radv/AMDVLK) | 已测试 |
-| Windows | Vulkan / D3D12 | 待测试 |
-| macOS / iOS | Metal | 待测试 |
-
-通过 SDL hint 选择底层驱动：
-
-```c
-SDL_SetHint(SDL_HINT_GPU_DRIVER, "vulkan");      // Linux 默认
-SDL_SetHint(SDL_HINT_GPU_DRIVER, "direct3d12");  // Windows
-SDL_SetHint(SDL_HINT_GPU_DRIVER, "metal");       // macOS/iOS
-```
+| Windows | Vulkan（厂商驱动） | 待测试 |
+| macOS / iOS | 不支持（SDL_GPU 无 Vulkan-on-Metal 路径） | — |
 
 ## 构建
 
