@@ -58,13 +58,13 @@ SPIR-V Data:    原始 SPIR-V 二进制
 
 ### 构建 FEB 文件
 
-使用 [FNA3D_HLSL_Test](../FNA3D_HLSL_Test/) 中的 `tools/feb_builder.py`：
+FEB 构建工具现位于 [FNA 仓库](../FNA/tools/) 中。也保留在 FNA3D_HLSL_Test 作为参考实现。
 
 ```bash
-python3 tools/feb_builder.py manifest.feb.json
+python3 ../FNA/tools/feb_builder.py manifest.feb.json
 ```
 
-Manifest 格式（`.feb.json`）及着色器编写约定详见[测试项目 README](../FNA3D_HLSL_Test/README.md)。
+Manifest 格式（`.feb.json`）详见 [FNA3D_Effect.h](src/FNA3D_Effect.h) 及源码注释。
 
 ## 依赖
 
