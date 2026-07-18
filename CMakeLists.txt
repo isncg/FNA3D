@@ -209,6 +209,15 @@ if(FNA3D_IMGUI)
 		target_compile_definitions(FNA3D PRIVATE "CIMGUI_API=__declspec(dllexport)")
 	endif()
 
+# 	# Copy generated dcimgui.h to include/ so consumers (FNA3D_HLSL_Test, C#)
+# 	# can #include "dcimgui.h" without knowing the build-tree path.
+# 	add_custom_command(TARGET FNA3D POST_BUILD
+# 		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+# 			"${DCIMGUI_GEN_DIR}/dcimgui.h"
+# 			"${CMAKE_CURRENT_SOURCE_DIR}/include/dcimgui.h"
+# 		COMMENT "Copying dcimgui.h to include/"
+# 	)
+
 		# ImGuizmo (3D gizmo/manipulator extension for ImGui)
 		option(FNA3D_IMGUIZMO "Build the ImGuizmo integration" ON)
 		if(FNA3D_IMGUIZMO)
