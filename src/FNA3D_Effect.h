@@ -32,7 +32,7 @@
 /* FEB (FNA3D Effect Binary) Format Constants */
 
 #define FEB_MAGIC 0x42414E46 /* "FNAB" */
-#define FEB_VERSION 1
+#define FEB_VERSION 2
 
 /* Shader Stage */
 
@@ -40,6 +40,7 @@ typedef enum FNA3D_ShaderStage
 {
 	FNA3D_SHADERSTAGE_VERTEX,
 	FNA3D_SHADERSTAGE_PIXEL,
+	FNA3D_SHADERSTAGE_COMPUTE,
 } FNA3D_ShaderStage;
 
 /* Render State Types (mirrors XNA/MojoShader render states) */
@@ -145,6 +146,7 @@ struct FNA3D_EffectPass
 	const char *name;
 	int32_t vertexShaderIndex;  /* -1 if none */
 	int32_t pixelShaderIndex;   /* -1 if none */
+	int32_t computeShaderIndex; /* -1 if none */
 	/* State changes are stored inline */
 	uint32_t renderStateCount;
 	uint32_t samplerStateCount;
@@ -165,6 +167,14 @@ struct FNA3D_EffectShader
 	uint32_t spirvSize;
 	uint32_t samplerCount;
 	uint32_t uniformBufferCount;
+	/* Compute pipeline metadata (0 for graphics shaders) */
+	uint32_t threadCountX;
+	uint32_t threadCountY;
+	uint32_t threadCountZ;
+	uint32_t readonlyStorageBufferCount;
+	uint32_t readwriteStorageBufferCount;
+	uint32_t readonlyStorageTextureCount;
+	uint32_t readwriteStorageTextureCount;
 };
 
 struct FNA3D_EffectStateChanges

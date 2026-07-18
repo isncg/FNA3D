@@ -144,7 +144,7 @@ uint8_t FNA3D_LoadEffect(
 	if (paramOffset >= dataLength ||
 		techniqueOffset + techniqueCount * 16 > dataLength ||
 		passOffset + passCount * 24 > dataLength ||
-		shaderOffset + shaderCount * 24 > dataLength ||
+		shaderOffset + shaderCount * 52 > dataLength ||
 		spirvOffset > dataLength)
 	{
 		FNA3D_LogError("FEB: Section offsets out of bounds!");
@@ -260,15 +260,18 @@ uint8_t FNA3D_LoadEffect(
 		pass->pixelShaderIndex = ReadI32(&p);
 		pass->renderStateCount = ReadU32(&p);
 		pass->samplerStateCount = ReadU32(&p);
-		p += 4; /* reserved */
+		pass->computeShaderIndex = ReadI32(&p);
 		pass->name = ResolveString(stringTable, nameOffset, stringTableSize);
 	}
 
-	/* Parse shaders */
+	/* Parse shaders — 52-byte entries:
+	 * stage(1)+pad(3)+entryOff(4)+spirvOff(4)+spirvSize(4)+samplers(4)+uniforms(4)
+	 * +threadX(4)+threadY(4)+threadZ(4)
+	 * +roBuf(4)+rwBuf(4)+roTex(4)+rwTex(4) */
 	for (i = 0; i < shaderCount; i++)
 	{
 		FNA3D_EffectShader *shader = &effect->shaders[i];
-		const uint8_t *p = shaderData + i * 24;
+		const uint8_t *p = shaderData + i * 52;
 		uint32_t entryOffset;
 		uint32_t sOffset, sSize;
 
@@ -279,6 +282,14 @@ uint8_t FNA3D_LoadEffect(
 		sSize = ReadU32(&p);
 		shader->samplerCount = ReadU32(&p);
 		shader->uniformBufferCount = ReadU32(&p);
+		/* Compute-specific fields */
+		shader->threadCountX = ReadU32(&p);
+		shader->threadCountY = ReadU32(&p);
+		shader->threadCountZ = ReadU32(&p);
+		shader->readonlyStorageBufferCount = ReadU32(&p);
+		shader->readwriteStorageBufferCount = ReadU32(&p);
+		shader->readonlyStorageTextureCount = ReadU32(&p);
+		shader->readwriteStorageTextureCount = ReadU32(&p);
 
 		shader->entryPoint = ResolveString(stringTable, entryOffset, stringTableSize);
 		shader->spirvData = spirvData + sOffset;
