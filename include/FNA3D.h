@@ -1333,6 +1333,68 @@ FNA3DAPI void FNA3D_GetIndexBufferData(
 	int32_t dataLength
 );
 
+/* Storage Buffers */
+
+/* Creates a GPU buffer for shader storage access (StructuredBuffer / RWStructuredBuffer).
+ *
+ * sizeInBytes:		Total size of the buffer.
+ * vertexWrite:		Set to 1 if vertex shaders will write to this buffer.
+ * vertexRead:		Set to 1 if vertex shaders will read from this buffer.
+ *
+ * When vertexWrite=1, vertexPipelineStoresAndAtomics must be supported.
+ */
+FNA3DAPI FNA3D_Buffer* FNA3D_GenStorageBuffer(
+	FNA3D_Device *device,
+	int32_t sizeInBytes,
+	uint8_t vertexWrite,
+	uint8_t vertexRead
+);
+
+FNA3DAPI void FNA3D_AddDisposeStorageBuffer(
+	FNA3D_Device *device,
+	FNA3D_Buffer *buffer
+);
+
+/* Sets a region of the storage buffer with client data.
+ *
+ * buffer:		The storage buffer to be updated.
+ * offsetInBytes:	The starting offset of the buffer to write into.
+ * data:			The client data to write into the buffer.
+ * dataLength:		The size (in bytes) of the client data.
+ */
+FNA3DAPI void FNA3D_SetStorageBufferData(
+	FNA3D_Device *device,
+	FNA3D_Buffer *buffer,
+	int32_t offsetInBytes,
+	void* data,
+	int32_t dataLength
+);
+
+/* Pulls data from a region of the storage buffer into a client pointer.
+ */
+FNA3DAPI void FNA3D_GetStorageBufferData(
+	FNA3D_Device *device,
+	FNA3D_Buffer *buffer,
+	int32_t offsetInBytes,
+	void* data,
+	int32_t dataLength
+);
+
+/* Binds storage buffers for vertex shader access.
+ *
+ * buffers:		Array of FNA3D_Buffer pointers.
+ * firstSlot:	The first binding slot (register(tN) in HLSL).
+ * numBuffers:	Number of buffers in the array.
+ * writable:	Set to 1 if the vertex shader writes to these buffers.
+ */
+FNA3DAPI void FNA3D_SetVertexStorageBuffers(
+	FNA3D_Device *device,
+	FNA3D_Buffer **buffers,
+	int32_t firstSlot,
+	int32_t numBuffers,
+	uint8_t writable
+);
+
 /* Effects */
 
 /* Effect Parameter Types */

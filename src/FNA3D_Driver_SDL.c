@@ -28,6 +28,74 @@
 
 #include <SDL3/SDL.h>
 
+/* Minimal Vulkan types for vertexPipelineStoresAndAtomics enablement.
+ * Avoids requiring the full Vulkan SDK headers just for one struct.
+ */
+#include <stdint.h>
+typedef uint32_t VkBool32;
+#define VK_TRUE 1
+/* Complete VkPhysicalDeviceFeatures matching Vulkan 1.0 spec.
+ * SDL_GPU reads the full struct size, so all fields must be present.
+ * -Ethan: we can't include vulkan.h because the SDK headers may not be installed.
+ */
+typedef struct VkPhysicalDeviceFeatures {
+	VkBool32 robustBufferAccess;
+	VkBool32 fullDrawIndexUint32;
+	VkBool32 imageCubeArray;
+	VkBool32 independentBlend;
+	VkBool32 geometryShader;
+	VkBool32 tessellationShader;
+	VkBool32 sampleRateShading;
+	VkBool32 dualSrcBlend;
+	VkBool32 logicOp;
+	VkBool32 multiDrawIndirect;
+	VkBool32 drawIndirectFirstInstance;
+	VkBool32 depthClamp;
+	VkBool32 depthBiasClamp;
+	VkBool32 fillModeNonSolid;
+	VkBool32 depthBounds;
+	VkBool32 wideLines;
+	VkBool32 largePoints;
+	VkBool32 alphaToOne;
+	VkBool32 multiViewport;
+	VkBool32 samplerAnisotropy;
+	VkBool32 textureCompressionETC2;
+	VkBool32 textureCompressionASTC_LDR;
+	VkBool32 textureCompressionBC;
+	VkBool32 occlusionQueryPrecise;
+	VkBool32 pipelineStatisticsQuery;
+	VkBool32 vertexPipelineStoresAndAtomics;
+	VkBool32 fragmentStoresAndAtomics;
+	VkBool32 shaderTessellationAndGeometryPointSize;
+	VkBool32 shaderImageGatherExtended;
+	VkBool32 shaderStorageImageExtendedFormats;
+	VkBool32 shaderStorageImageMultisample;
+	VkBool32 shaderStorageImageReadWithoutFormat;
+	VkBool32 shaderStorageImageWriteWithoutFormat;
+	VkBool32 shaderUniformBufferArrayDynamicIndexing;
+	VkBool32 shaderSampledImageArrayDynamicIndexing;
+	VkBool32 shaderStorageBufferArrayDynamicIndexing;
+	VkBool32 shaderStorageImageArrayDynamicIndexing;
+	VkBool32 shaderClipDistance;
+	VkBool32 shaderCullDistance;
+	VkBool32 shaderFloat64;
+	VkBool32 shaderInt64;
+	VkBool32 shaderInt16;
+	VkBool32 shaderResourceResidency;
+	VkBool32 shaderResourceMinLod;
+	VkBool32 sparseBinding;
+	VkBool32 sparseResidencyBuffer;
+	VkBool32 sparseResidencyImage2D;
+	VkBool32 sparseResidencyImage3D;
+	VkBool32 sparseResidency2Samples;
+	VkBool32 sparseResidency4Samples;
+	VkBool32 sparseResidency8Samples;
+	VkBool32 sparseResidency16Samples;
+	VkBool32 sparseResidencyAliased;
+	VkBool32 variableMultisampleRate;
+	VkBool32 inheritedQueries;
+} VkPhysicalDeviceFeatures;
+
 #include "FNA3D_Driver.h"
 #include "FNA3D_Effect.h"
 #include "FNA3D_PipelineCache.h"
@@ -3656,6 +3724,122 @@ static void SDLGPU_GetIndexBufferData(
 	);
 }
 
+/* Storage Buffers */
+
+static FNA3D_Buffer* SDLGPU_GenStorageBuffer(
+	FNA3D_Renderer *driverData,
+	int32_t sizeInBytes,
+	uint8_t vertexWrite,
+	uint8_t vertexRead
+) {
+	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
+	SDLGPU_BufferHandle *bufferHandle =
+		SDL_malloc(sizeof(SDLGPU_BufferHandle));
+	SDL_GPUBufferCreateInfo createInfo;
+
+	createInfo.size = (uint32_t) sizeInBytes;
+	createInfo.props = 0;
+	createInfo.usage = 0;
+
+	if (vertexRead)
+	{
+		createInfo.usage |= SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+	}
+	if (vertexWrite)
+	{
+		createInfo.usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
+	}
+
+	bufferHandle->buffer = SDL_CreateGPUBuffer(
+		renderer->device,
+		&createInfo
+	);
+	bufferHandle->size = (uint32_t) sizeInBytes;
+
+	return (FNA3D_Buffer*) bufferHandle;
+}
+
+static void SDLGPU_AddDisposeStorageBuffer(
+	FNA3D_Renderer *driverData,
+	FNA3D_Buffer *buffer
+) {
+	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
+	SDLGPU_BufferHandle *bufferHandle = (SDLGPU_BufferHandle*) buffer;
+
+	SDL_ReleaseGPUBuffer(
+		renderer->device,
+		bufferHandle->buffer
+	);
+	SDL_free(bufferHandle);
+}
+
+static void SDLGPU_SetStorageBufferData(
+	FNA3D_Renderer *driverData,
+	FNA3D_Buffer *buffer,
+	int32_t offsetInBytes,
+	void* data,
+	int32_t dataLength
+) {
+	SDLGPU_BufferHandle *bufferHandle = (SDLGPU_BufferHandle*) buffer;
+	uint8_t cycle = (offsetInBytes == 0 &&
+		(uint32_t) dataLength == bufferHandle->size);
+
+	SDLGPU_INTERNAL_SetBufferData(
+		(SDLGPU_Renderer*) driverData,
+		bufferHandle->buffer,
+		(uint32_t) offsetInBytes,
+		data,
+		(uint32_t) dataLength,
+		cycle
+	);
+}
+
+static void SDLGPU_GetStorageBufferData(
+	FNA3D_Renderer *driverData,
+	FNA3D_Buffer *buffer,
+	int32_t offsetInBytes,
+	void* data,
+	int32_t dataLength
+) {
+	SDLGPU_BufferHandle *bufferHandle = (SDLGPU_BufferHandle*) buffer;
+
+	SDLGPU_INTERNAL_GetBufferData(
+		(SDLGPU_Renderer*) driverData,
+		bufferHandle->buffer,
+		(uint32_t) offsetInBytes,
+		data,
+		(uint32_t) dataLength
+	);
+}
+
+static void SDLGPU_SetVertexStorageBuffers(
+	FNA3D_Renderer *driverData,
+	FNA3D_Buffer **buffers,
+	int32_t firstSlot,
+	int32_t numBuffers,
+	uint8_t writable
+) {
+	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
+	SDL_GPUBuffer *sdlBuffers[16];
+	int32_t i;
+
+	SDLGPU_INTERNAL_BeginRenderPass(renderer);
+
+	for (i = 0; i < numBuffers && i < 16; i++)
+	{
+		sdlBuffers[i] = ((SDLGPU_BufferHandle*) buffers[i])->buffer;
+	}
+
+	SDL_BindGPUVertexStorageBuffers(
+		renderer->renderPass,
+		(uint32_t) firstSlot,
+		sdlBuffers,
+		(uint32_t) numBuffers
+	);
+}
+
+/* Textures */
+
 static void SDLGPU_GetTextureData2D(
 	FNA3D_Renderer *driverData,
 	FNA3D_Texture *texture,
@@ -3820,6 +4004,12 @@ static void SDLGPU_CreateEffect(
 			 */
 			createInfo.num_samplers = SDL_max(vs->samplerCount, 1);
 			createInfo.num_uniform_buffers = vs->uniformBufferCount;
+			createInfo.num_storage_buffers =
+				vs->readonlyStorageBufferCount +
+				vs->readwriteStorageBufferCount;
+			createInfo.num_storage_textures =
+				vs->readonlyStorageTextureCount +
+				vs->readwriteStorageTextureCount;
 			result->vertexShaders[i] = SDL_CreateGPUShader(
 				renderer->device, &createInfo);
 		}
@@ -3837,6 +4027,12 @@ static void SDLGPU_CreateEffect(
 			createInfo.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
 			createInfo.num_samplers = SDL_max(ps->samplerCount, 1);
 			createInfo.num_uniform_buffers = ps->uniformBufferCount;
+			createInfo.num_storage_buffers =
+				ps->readonlyStorageBufferCount +
+				ps->readwriteStorageBufferCount;
+			createInfo.num_storage_textures =
+				ps->readonlyStorageTextureCount +
+				ps->readwriteStorageTextureCount;
 			result->pixelShaders[i] = SDL_CreateGPUShader(
 				renderer->device, &createInfo);
 		}
@@ -4576,6 +4772,20 @@ static FNA3D_Device* SDLGPU_CreateDevice(
 		debugMode ? SDL_LOG_PRIORITY_DEBUG : SDL_LOG_PRIORITY_INFO);
 
 	props = SDLGPU_INTERNAL_FillProperties(debugMode);
+
+	/* Enable vertex shader storage buffer writes */
+	{
+		VkPhysicalDeviceFeatures vkFeatures;
+		SDL_GPUVulkanOptions vulkanOptions;
+		SDL_memset(&vkFeatures, 0, sizeof(vkFeatures));
+		vkFeatures.vertexPipelineStoresAndAtomics = VK_TRUE;
+		SDL_memset(&vulkanOptions, 0, sizeof(vulkanOptions));
+		vulkanOptions.vulkan_10_physical_device_features = &vkFeatures;
+		SDL_SetPointerProperty(props,
+			SDL_PROP_GPU_DEVICE_CREATE_VULKAN_OPTIONS_POINTER,
+			&vulkanOptions);
+	}
+
 	device = SDL_CreateGPUDeviceWithProperties(props);
 	SDL_DestroyProperties(props);
 

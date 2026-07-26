@@ -609,6 +609,40 @@ struct FNA3D_Device
 		int32_t dataLength
 	);
 
+	/* Storage Buffers (GPU read/write, accessible from shaders) */
+
+	FNA3D_Buffer* (*GenStorageBuffer)(
+		FNA3D_Renderer *driverData,
+		int32_t sizeInBytes,
+		uint8_t vertexWrite,
+		uint8_t vertexRead
+	);
+	void (*AddDisposeStorageBuffer)(
+		FNA3D_Renderer *driverData,
+		FNA3D_Buffer *buffer
+	);
+	void (*SetStorageBufferData)(
+		FNA3D_Renderer *driverData,
+		FNA3D_Buffer *buffer,
+		int32_t offsetInBytes,
+		void* data,
+		int32_t dataLength
+	);
+	void (*GetStorageBufferData)(
+		FNA3D_Renderer *driverData,
+		FNA3D_Buffer *buffer,
+		int32_t offsetInBytes,
+		void* data,
+		int32_t dataLength
+	);
+	void (*SetVertexStorageBuffers)(
+		FNA3D_Renderer *driverData,
+		FNA3D_Buffer **buffers,
+		int32_t firstSlot,
+		int32_t numBuffers,
+		uint8_t writable
+	);
+
 	/* Effects */
 
 	void (*CreateEffect)(
@@ -776,6 +810,11 @@ struct FNA3D_Device
 	ASSIGN_DRIVER_FUNC(AddDisposeIndexBuffer, name) \
 	ASSIGN_DRIVER_FUNC(SetIndexBufferData, name) \
 	ASSIGN_DRIVER_FUNC(GetIndexBufferData, name) \
+	ASSIGN_DRIVER_FUNC(GenStorageBuffer, name) \
+	ASSIGN_DRIVER_FUNC(AddDisposeStorageBuffer, name) \
+	ASSIGN_DRIVER_FUNC(SetStorageBufferData, name) \
+	ASSIGN_DRIVER_FUNC(GetStorageBufferData, name) \
+	ASSIGN_DRIVER_FUNC(SetVertexStorageBuffers, name) \
 	ASSIGN_DRIVER_FUNC(CreateEffect, name) \
 	ASSIGN_DRIVER_FUNC(CloneEffect, name) \
 	ASSIGN_DRIVER_FUNC(AddDisposeEffect, name) \

@@ -1094,6 +1094,97 @@ void FNA3D_GetIndexBufferData(
 	);
 }
 
+/* Storage Buffers */
+
+FNA3D_Buffer* FNA3D_GenStorageBuffer(
+	FNA3D_Device *device,
+	int32_t sizeInBytes,
+	uint8_t vertexWrite,
+	uint8_t vertexRead
+) {
+	if (device == NULL)
+	{
+		return NULL;
+	}
+	return device->GenStorageBuffer(
+		device->driverData,
+		sizeInBytes,
+		vertexWrite,
+		vertexRead
+	);
+}
+
+void FNA3D_AddDisposeStorageBuffer(
+	FNA3D_Device *device,
+	FNA3D_Buffer *buffer
+) {
+	if (device == NULL || buffer == NULL)
+	{
+		return;
+	}
+	device->AddDisposeStorageBuffer(device->driverData, buffer);
+}
+
+void FNA3D_SetStorageBufferData(
+	FNA3D_Device *device,
+	FNA3D_Buffer *buffer,
+	int32_t offsetInBytes,
+	void* data,
+	int32_t dataLength
+) {
+	if (device == NULL)
+	{
+		return;
+	}
+	device->SetStorageBufferData(
+		device->driverData,
+		buffer,
+		offsetInBytes,
+		data,
+		dataLength
+	);
+}
+
+void FNA3D_GetStorageBufferData(
+	FNA3D_Device *device,
+	FNA3D_Buffer *buffer,
+	int32_t offsetInBytes,
+	void* data,
+	int32_t dataLength
+) {
+	if (device == NULL)
+	{
+		return;
+	}
+	device->GetStorageBufferData(
+		device->driverData,
+		buffer,
+		offsetInBytes,
+		data,
+		dataLength
+	);
+}
+
+void FNA3D_SetVertexStorageBuffers(
+	FNA3D_Device *device,
+	FNA3D_Buffer **buffers,
+	int32_t firstSlot,
+	int32_t numBuffers,
+	uint8_t writable
+) {
+	if (device == NULL)
+	{
+		return;
+	}
+	device->SetVertexStorageBuffers(
+		device->driverData,
+		buffers,
+		firstSlot,
+		numBuffers,
+		writable
+	);
+}
+
 /* Effects */
 
 uint8_t FNA3D_CreateEffect(
