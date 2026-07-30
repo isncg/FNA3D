@@ -782,6 +782,31 @@ static inline SDL_GPUTextureFormat XNAToSDL_DepthFormat(
 	}
 }
 
+/* Returns usage flags for a depth-stencil target, adding SAMPLER when the
+ * device supports sampling the format (needed for SSAO, soft shadows, SSR).
+ * MSAA textures cannot have SAMPLER usage in SDL_GPU, so sampling is only
+ * enabled for single-sample targets.
+ */
+static inline SDL_GPUTextureUsageFlags SDLGPU_INTERNAL_GetDepthUsageFlags(
+	SDLGPU_Renderer *renderer,
+	SDL_GPUTextureFormat format,
+	SDL_GPUSampleCount sampleCount
+) {
+	if (	sampleCount == SDL_GPU_SAMPLECOUNT_1 &&
+		SDL_GPUTextureSupportsFormat(
+			renderer->device,
+			format,
+			SDL_GPU_TEXTURETYPE_2D,
+			SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET |
+			SDL_GPU_TEXTUREUSAGE_SAMPLER
+		)	)
+	{
+		return	SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET |
+			SDL_GPU_TEXTUREUSAGE_SAMPLER;
+	}
+	return SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+}
+
 /* Submission / Presentation */
 
 static void SDLGPU_INTERNAL_BeginCopyPass(
@@ -2696,7 +2721,11 @@ static void SDLGPU_INTERNAL_CreateFauxBackbuffer(
 			XNAToSDL_DepthFormat(renderer, presentationParameters->depthStencilFormat),
 			1,
 			1,
-			SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
+			SDLGPU_INTERNAL_GetDepthUsageFlags(
+				renderer,
+				XNAToSDL_DepthFormat(renderer, presentationParameters->depthStencilFormat),
+				sampleCount
+			),
 			sampleCount
 		);
 	}
@@ -2972,7 +3001,11 @@ static FNA3D_Renderbuffer* SDLGPU_GenDepthStencilRenderbuffer(
 		XNAToSDL_DepthFormat(renderer, format),
 		1,
 		1,
-		SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
+		SDLGPU_INTERNAL_GetDepthUsageFlags(
+			renderer,
+			XNAToSDL_DepthFormat(renderer, format),
+			XNAToSDL_SampleCount(multiSampleCount)
+		),
 		XNAToSDL_SampleCount(multiSampleCount)
 	);
 
@@ -4944,13 +4977,15 @@ static FNA3D_Device* SDLGPU_CreateDevice(
 		renderer->device,
 		SDL_GPU_TEXTUREFORMAT_D24_UNORM,
 		SDL_GPU_TEXTURETYPE_2D,
-		SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET
+		SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET |
+		SDL_GPU_TEXTUREUSAGE_SAMPLER
 	);
 	renderer->supportsD24S8 = SDL_GPUTextureSupportsFormat(
 		renderer->device,
 		SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT,
 		SDL_GPU_TEXTURETYPE_2D,
-		SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET
+		SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET |
+		SDL_GPU_TEXTUREUSAGE_SAMPLER
 	);
 	renderer->supportsBaseVertex = 1; /* FIXME: moltenVK fix */
 
