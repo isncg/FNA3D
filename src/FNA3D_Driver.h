@@ -544,6 +544,10 @@ struct FNA3D_Device
 		FNA3D_DepthFormat format,
 		int32_t multiSampleCount
 	);
+	FNA3D_Texture* (*GetDepthStencilTexture)(
+		FNA3D_Renderer *driverData,
+		FNA3D_Renderbuffer *renderbuffer
+	);
 	void (*AddDisposeRenderbuffer)(
 		FNA3D_Renderer *driverData,
 		FNA3D_Renderbuffer *renderbuffer
@@ -801,6 +805,7 @@ struct FNA3D_Device
 	ASSIGN_DRIVER_FUNC(GetTextureDataCube, name) \
 	ASSIGN_DRIVER_FUNC(GenColorRenderbuffer, name) \
 	ASSIGN_DRIVER_FUNC(GenDepthStencilRenderbuffer, name) \
+	ASSIGN_DRIVER_FUNC(GetDepthStencilTexture, name) \
 	ASSIGN_DRIVER_FUNC(AddDisposeRenderbuffer, name) \
 	ASSIGN_DRIVER_FUNC(GenVertexBuffer, name) \
 	ASSIGN_DRIVER_FUNC(GenIndexBuffer, name) \

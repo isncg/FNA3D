@@ -415,6 +415,11 @@ typedef struct SDLGPU_TextureHandle /* Cast from FNA3D_Texture* */
 	SDL_GPUTexture *texture;
 	SDL_GPUTextureCreateInfo createInfo;
 	uint8_t boundAsRenderTarget;
+	/* 0 for handles that alias a texture owned by another handle
+	 * (e.g. depth textures from GetDepthStencilTexture); such handles
+	 * must not release the underlying SDL_GPUTexture.
+	 */
+	uint8_t ownsTexture;
 } SDLGPU_TextureHandle;
 
 typedef struct SDLGPU_Renderbuffer /* Cast from FNA3D_Renderbuffer* */
@@ -2584,10 +2589,13 @@ static void SDLGPU_INTERNAL_FreeTextureHandle(
 			}
 		}
 	}
-	SDL_ReleaseGPUTexture(
-		renderer->device,
-		handle->texture
-	);
+	if (handle->ownsTexture)
+	{
+		SDL_ReleaseGPUTexture(
+			renderer->device,
+			handle->texture
+		);
+	}
 	SDL_free(handle);
 }
 
@@ -2675,6 +2683,7 @@ static SDLGPU_TextureHandle* SDLGPU_INTERNAL_CreateTextureWithHandle(
 	textureHandle->texture = texture;
 	textureHandle->createInfo = textureCreateInfo;
 	textureHandle->boundAsRenderTarget = 0;
+	textureHandle->ownsTexture = 1;
 
 	return textureHandle;
 }
@@ -3021,6 +3030,40 @@ static FNA3D_Renderbuffer* SDLGPU_GenDepthStencilRenderbuffer(
 	renderbuffer->format = XNAToSDL_DepthFormat(renderer, format);
 
 	return (FNA3D_Renderbuffer*) renderbuffer;
+}
+
+static FNA3D_Texture* SDLGPU_GetDepthStencilTexture(
+	FNA3D_Renderer *driverData,
+	FNA3D_Renderbuffer *renderbuffer
+) {
+	SDLGPU_Renderbuffer *depthBuffer = (SDLGPU_Renderbuffer*) renderbuffer;
+	SDLGPU_TextureHandle *handle;
+
+	if (depthBuffer == NULL || depthBuffer->textureHandle == NULL)
+	{
+		return NULL;
+	}
+
+	/* Requires the SAMPLER usage from Phase 1; MSAA and unsupported
+	 * formats fall back to a non-sampleable depth target.
+	 */
+	if (!(depthBuffer->textureHandle->createInfo.usage & SDL_GPU_TEXTUREUSAGE_SAMPLER))
+	{
+		FNA3D_LogError("Depth renderbuffer is not sampleable!");
+		return NULL;
+	}
+
+	/* The returned handle aliases the renderbuffer's SDL_GPUTexture;
+	 * ownsTexture = 0 keeps AddDisposeTexture from double-freeing it.
+	 * The renderbuffer must outlive the returned texture.
+	 */
+	handle = SDL_malloc(sizeof(SDLGPU_TextureHandle));
+	handle->texture = depthBuffer->textureHandle->texture;
+	handle->createInfo = depthBuffer->textureHandle->createInfo;
+	handle->boundAsRenderTarget = 0;
+	handle->ownsTexture = 0;
+
+	return (FNA3D_Texture*) handle;
 }
 
 static void SDLGPU_AddDisposeTexture(

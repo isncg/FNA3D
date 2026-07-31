@@ -1177,6 +1177,21 @@ FNA3DAPI FNA3D_Renderbuffer* FNA3D_GenDepthStencilRenderbuffer(
 	int32_t multiSampleCount
 );
 
+/* Returns a sampleable texture handle that aliases an existing depth
+ * renderbuffer. The renderbuffer must have been created with SAMPLER usage
+ * (single-sample, format must support sampling; NULL otherwise).
+ * The returned texture shares the underlying GPU resource: dispose it with
+ * FNA3D_AddDisposeTexture *before* disposing the renderbuffer itself.
+ *
+ * renderbuffer: The depth renderbuffer from FNA3D_GenDepthStencilRenderbuffer.
+ *
+ * Returns a texture suitable for shader sampling, or NULL.
+ */
+FNA3DAPI FNA3D_Texture* FNA3D_GetDepthStencilTexture(
+	FNA3D_Device *device,
+	FNA3D_Renderbuffer *renderbuffer
+);
+
 /* Sends a renderbuffer to be destroyed by the renderer. Note that we call it
  * "AddDispose" because it may not be immediately destroyed by the renderer if
  * this is not called from the main thread (for example, if a garbage collector

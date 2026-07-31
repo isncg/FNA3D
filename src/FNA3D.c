@@ -922,6 +922,20 @@ FNA3D_Renderbuffer* FNA3D_GenDepthStencilRenderbuffer(
 	return result;
 }
 
+FNA3D_Texture* FNA3D_GetDepthStencilTexture(
+	FNA3D_Device *device,
+	FNA3D_Renderbuffer *renderbuffer
+) {
+	if (device == NULL || renderbuffer == NULL)
+	{
+		return NULL;
+	}
+	return device->GetDepthStencilTexture(
+		device->driverData,
+		renderbuffer
+	);
+}
+
 void FNA3D_AddDisposeRenderbuffer(
 	FNA3D_Device *device,
 	FNA3D_Renderbuffer *renderbuffer
