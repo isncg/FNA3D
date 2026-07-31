@@ -2593,6 +2593,34 @@ static void SDLGPU_INTERNAL_FreeTextureHandle(
 	SDLGPU_TextureHandle *handle
 ) {
 	uint32_t i;
+
+	/* Scrub stale sampler bindings: the texture may still sit in a
+	 * binding slot that the app never rebinds, and the next draw would
+	 * hand the freed SDL_GPUTexture to SDL_BindGPU*Samplers.
+	 */
+	for (i = 0; i < MAX_TEXTURE_SAMPLERS; i += 1)
+	{
+		if (renderer->fragmentTextureSamplerBindings[i].texture == handle->texture)
+		{
+			renderer->fragmentTextureSamplerBindings[i].texture =
+				renderer->dummyTexture2D;
+			renderer->fragmentTextureSamplerBindings[i].sampler =
+				renderer->dummySampler;
+			renderer->needFragmentSamplerBind = 1;
+		}
+	}
+	for (i = 0; i < MAX_VERTEXTEXTURE_SAMPLERS; i += 1)
+	{
+		if (renderer->vertexTextureSamplerBindings[i].texture == handle->texture)
+		{
+			renderer->vertexTextureSamplerBindings[i].texture =
+				renderer->dummyTexture2D;
+			renderer->vertexTextureSamplerBindings[i].sampler =
+				renderer->dummySampler;
+			renderer->needVertexSamplerBind = 1;
+		}
+	}
+
 	if (handle->boundAsRenderTarget)
 	{
 		for (i = 0; i < renderer->boundRenderTargetCount; i += 1)
@@ -4619,13 +4647,16 @@ static void SDLGPU_SetEffectParamValueByHandle(
 	if (gpuEffect == NULL || gpuEffect->uniformData == NULL)
 		return;
 
-	paramSize = FNA3D_GetParamSize(param->type);
-	if (offset + length > paramSize)
+	/* Arrays span multiple registers but the FEB only records the scalar
+	 * type, so clamp against the effect's whole uniform buffer rather
+	 * than the scalar param size.
+	 */
+	if (param->bufferOffset + offset + length > gpuEffect->uniformDataSize)
 	{
-		FNA3D_LogWarn("SetEffectParamValue: offset+length (%u) exceeds param size (%u)",
-			offset + length, paramSize);
-		if (offset >= paramSize) return;
-		length = paramSize - offset;
+		FNA3D_LogWarn("SetEffectParamValue: write (%u) exceeds uniform buffer (%u)",
+			param->bufferOffset + offset + length, gpuEffect->uniformDataSize);
+		if (param->bufferOffset + offset >= gpuEffect->uniformDataSize) return;
+		length = gpuEffect->uniformDataSize - param->bufferOffset - offset;
 	}
 
 	SDL_memcpy(
@@ -4634,11 +4665,16 @@ static void SDLGPU_SetEffectParamValueByHandle(
 		length
 	);
 
-	SDL_memcpy(
-		((uint8_t*) &param->currentValue) + offset,
-		data,
-		length
-	);
+	/* currentValue only holds one scalar's worth (16 floats) */
+	paramSize = FNA3D_GetParamSize(param->type);
+	if (offset < paramSize)
+	{
+		SDL_memcpy(
+			((uint8_t*) &param->currentValue) + offset,
+			data,
+			SDL_min(length, paramSize - offset)
+		);
+	}
 
 	param->dirty = 1;
 	gpuEffect->uniformDirty = 1;
