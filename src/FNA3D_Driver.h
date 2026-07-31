@@ -646,6 +646,21 @@ struct FNA3D_Device
 		int32_t numBuffers,
 		uint8_t writable
 	);
+	void (*SetComputeStorageBuffers)(
+		FNA3D_Renderer *driverData,
+		FNA3D_Buffer **buffers,
+		int32_t firstSlot,
+		int32_t numBuffers,
+		uint8_t writable
+	);
+	void (*DispatchCompute)(
+		FNA3D_Renderer *driverData,
+		FNA3D_Effect *effect,
+		uint32_t pass,
+		uint32_t threadGroupCountX,
+		uint32_t threadGroupCountY,
+		uint32_t threadGroupCountZ
+	);
 
 	/* Effects */
 
@@ -820,6 +835,8 @@ struct FNA3D_Device
 	ASSIGN_DRIVER_FUNC(SetStorageBufferData, name) \
 	ASSIGN_DRIVER_FUNC(GetStorageBufferData, name) \
 	ASSIGN_DRIVER_FUNC(SetVertexStorageBuffers, name) \
+	ASSIGN_DRIVER_FUNC(SetComputeStorageBuffers, name) \
+	ASSIGN_DRIVER_FUNC(DispatchCompute, name) \
 	ASSIGN_DRIVER_FUNC(CreateEffect, name) \
 	ASSIGN_DRIVER_FUNC(CloneEffect, name) \
 	ASSIGN_DRIVER_FUNC(AddDisposeEffect, name) \

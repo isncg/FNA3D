@@ -1410,6 +1410,42 @@ FNA3DAPI void FNA3D_SetVertexStorageBuffers(
 	uint8_t writable
 );
 
+/* Binds storage buffers for the next DispatchCompute call.
+ *
+ * buffers:    Array of FNA3D_Buffer pointers.
+ * firstSlot:  First binding slot. For read-only buffers this is the
+ *             register(tN) index; read-write buffers always start at 0
+ *             (register(uN)) and are bound when the compute pass begins.
+ * numBuffers: Number of buffers in the array.
+ * writable:   1 if the compute shader writes to these buffers (u#),
+ *             0 for read-only access (t#).
+ */
+FNA3DAPI void FNA3D_SetComputeStorageBuffers(
+	FNA3D_Device *device,
+	FNA3D_Buffer **buffers,
+	int32_t firstSlot,
+	int32_t numBuffers,
+	uint8_t writable
+);
+
+/* Dispatches a compute shader. Ends any in-progress render pass first,
+ * since a compute pass cannot be nested inside a render pass. Bind the
+ * storage buffers with FNA3D_SetComputeStorageBuffers beforehand and set
+ * uniforms via the normal effect parameter API.
+ *
+ * effect:  The effect whose pass holds the compute shader.
+ * pass:    Global pass index containing the compute shader.
+ * threadGroupCountX/Y/Z: Number of thread groups to dispatch.
+ */
+FNA3DAPI void FNA3D_DispatchCompute(
+	FNA3D_Device *device,
+	FNA3D_Effect *effect,
+	uint32_t pass,
+	uint32_t threadGroupCountX,
+	uint32_t threadGroupCountY,
+	uint32_t threadGroupCountZ
+);
+
 /* Effects */
 
 /* Effect Parameter Types */

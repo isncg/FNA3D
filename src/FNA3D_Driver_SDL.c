@@ -409,6 +409,9 @@ static inline SDL_Rect ComputeRectIntersection(int x1, int x2, int y1, int y2, i
 	return newRect;
 }
 
+/* SDL_GPU allows at most 8 storage buffers per compute stage */
+#define MAX_COMPUTE_STORAGE_BUFFERS 8
+
 /* Indirection to cleanly handle Renderbuffers */
 typedef struct SDLGPU_TextureHandle /* Cast from FNA3D_Texture* */
 {
@@ -434,6 +437,7 @@ typedef struct SDLGPU_Effect /* Cast from FNA3D_Effect* */
 	FNA3D_Effect *effectData;
 	SDL_GPUShader **vertexShaders;  /* one per pass */
 	SDL_GPUShader **pixelShaders;   /* one per pass */
+	SDL_GPUComputePipeline **computePipelines; /* one per pass, NULL for graphics passes */
 	uint8_t *uniformData;           /* CPU-side uniform buffer */
 	uint32_t uniformDataSize;       /* total size of uniform data */
 	uint8_t uniformDirty;           /* any parameter changed since last push */
@@ -624,6 +628,17 @@ typedef struct SDLGPU_Renderer
 	SDL_GPUCopyPass *copyPass;
 	SDL_GPURenderPass *renderPass;
 	uint8_t needNewRenderPass;
+
+	/* Compute pass storage buffer bindings, filled by
+	 * SetComputeStorageBuffers and consumed by DispatchCompute.
+	 * Read-write buffers have to be handed to SDL_BeginGPUComputePass,
+	 * so they cannot be bound while a compute pass is already running.
+	 */
+	SDL_GPUBuffer *computeReadWriteBuffers[MAX_COMPUTE_STORAGE_BUFFERS];
+	uint32_t computeReadWriteBufferCount;
+	SDL_GPUBuffer *computeReadOnlyBuffers[MAX_COMPUTE_STORAGE_BUFFERS];
+	uint32_t computeReadOnlyBufferCount;
+	uint32_t computeReadOnlyFirstSlot;
 
 	SDL_Mutex *commandLock;
 
@@ -3820,6 +3835,10 @@ static FNA3D_Buffer* SDLGPU_GenStorageBuffer(
 	if (vertexRead)
 	{
 		createInfo.usage |= SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+		/* Also readable from compute, so the same buffer can feed both
+		 * a compute pass and the graphics pipeline.
+		 */
+		createInfo.usage |= SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
 	}
 	if (vertexWrite)
 	{
@@ -3912,6 +3931,148 @@ static void SDLGPU_SetVertexStorageBuffers(
 		sdlBuffers,
 		(uint32_t) numBuffers
 	);
+}
+
+static void SDLGPU_SetComputeStorageBuffers(
+	FNA3D_Renderer *driverData,
+	FNA3D_Buffer **buffers,
+	int32_t firstSlot,
+	int32_t numBuffers,
+	uint8_t writable
+) {
+	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
+	uint32_t i, count;
+
+	count = (uint32_t) SDL_max(numBuffers, 0);
+	if (count > MAX_COMPUTE_STORAGE_BUFFERS)
+	{
+		FNA3D_LogWarn("Too many compute storage buffers, clamping to %d",
+			MAX_COMPUTE_STORAGE_BUFFERS);
+		count = MAX_COMPUTE_STORAGE_BUFFERS;
+	}
+
+	/* Recorded now, applied by the next DispatchCompute */
+	if (writable)
+	{
+		for (i = 0; i < count; i += 1)
+		{
+			renderer->computeReadWriteBuffers[i] =
+				((SDLGPU_BufferHandle*) buffers[i])->buffer;
+		}
+		renderer->computeReadWriteBufferCount = count;
+	}
+	else
+	{
+		for (i = 0; i < count; i += 1)
+		{
+			renderer->computeReadOnlyBuffers[i] =
+				((SDLGPU_BufferHandle*) buffers[i])->buffer;
+		}
+		renderer->computeReadOnlyBufferCount = count;
+		renderer->computeReadOnlyFirstSlot = (uint32_t) SDL_max(firstSlot, 0);
+	}
+}
+
+static void SDLGPU_DispatchCompute(
+	FNA3D_Renderer *driverData,
+	FNA3D_Effect *effect,
+	uint32_t pass,
+	uint32_t threadGroupCountX,
+	uint32_t threadGroupCountY,
+	uint32_t threadGroupCountZ
+) {
+	SDLGPU_Renderer *renderer = (SDLGPU_Renderer*) driverData;
+	SDLGPU_Effect *gpuEffect;
+	SDL_GPUComputePass *computePass;
+	SDL_GPUStorageBufferReadWriteBinding
+		rwBufferBindings[MAX_COMPUTE_STORAGE_BUFFERS];
+	FNA3D_EffectShader *cs;
+	uint32_t i;
+
+	if (effect == NULL || effect->driverData == NULL)
+	{
+		return;
+	}
+
+	gpuEffect = (SDLGPU_Effect*) effect->driverData;
+
+	if (	pass >= effect->passCount ||
+		gpuEffect->computePipelines == NULL ||
+		gpuEffect->computePipelines[pass] == NULL	)
+	{
+		FNA3D_LogError("DispatchCompute: pass %u has no compute shader!", pass);
+		return;
+	}
+
+	SDL_LockMutex(renderer->commandLock);
+
+	/* A compute pass cannot be nested inside a render pass */
+	SDLGPU_INTERNAL_EndRenderPass(renderer);
+
+	for (i = 0; i < renderer->computeReadWriteBufferCount; i += 1)
+	{
+		SDL_zero(rwBufferBindings[i]);
+		rwBufferBindings[i].buffer = renderer->computeReadWriteBuffers[i];
+		/* Never cycle: the caller may have uploaded data we must keep,
+		 * and cycling would hand us a different allocation than the one
+		 * GetStorageBufferData reads back.
+		 */
+		rwBufferBindings[i].cycle = false;
+	}
+
+	computePass = SDL_BeginGPUComputePass(
+		renderer->renderCommandBuffer,
+		NULL,
+		0,
+		renderer->computeReadWriteBufferCount > 0 ? rwBufferBindings : NULL,
+		renderer->computeReadWriteBufferCount
+	);
+
+	if (computePass == NULL)
+	{
+		FNA3D_LogError("Failed to begin compute pass: %s", SDL_GetError());
+		SDL_UnlockMutex(renderer->commandLock);
+		return;
+	}
+
+	SDL_BindGPUComputePipeline(
+		computePass,
+		gpuEffect->computePipelines[pass]
+	);
+
+	if (renderer->computeReadOnlyBufferCount > 0)
+	{
+		SDL_BindGPUComputeStorageBuffers(
+			computePass,
+			renderer->computeReadOnlyFirstSlot,
+			renderer->computeReadOnlyBuffers,
+			renderer->computeReadOnlyBufferCount
+		);
+	}
+
+	cs = &effect->shaders[effect->passes[pass].computeShaderIndex];
+	if (	cs->uniformBufferCount > 0 &&
+		gpuEffect->uniformData != NULL &&
+		gpuEffect->uniformDataSize > 0	)
+	{
+		SDL_PushGPUComputeUniformData(
+			renderer->renderCommandBuffer,
+			0, /* slot 0 */
+			gpuEffect->uniformData,
+			gpuEffect->uniformDataSize
+		);
+	}
+
+	SDL_DispatchGPUCompute(
+		computePass,
+		threadGroupCountX,
+		threadGroupCountY,
+		threadGroupCountZ
+	);
+
+	SDL_EndGPUComputePass(computePass);
+
+	SDL_UnlockMutex(renderer->commandLock);
 }
 
 /* Textures */
@@ -4057,6 +4218,10 @@ static void SDLGPU_CreateEffect(
 		result->effectData->passCount,
 		sizeof(SDL_GPUShader*)
 	);
+	result->computePipelines = (SDL_GPUComputePipeline**) SDL_calloc(
+		result->effectData->passCount,
+		sizeof(SDL_GPUComputePipeline*)
+	);
 
 	/* Create SDL_GPUShader objects for each pass */
 	for (i = 0; i < result->effectData->passCount; i++)
@@ -4111,6 +4276,42 @@ static void SDLGPU_CreateEffect(
 				ps->readwriteStorageTextureCount;
 			result->pixelShaders[i] = SDL_CreateGPUShader(
 				renderer->device, &createInfo);
+		}
+
+		if (pass->computeShaderIndex >= 0)
+		{
+			FNA3D_EffectShader *cs = &result->effectData->shaders[
+				pass->computeShaderIndex];
+			SDL_GPUComputePipelineCreateInfo computeCreateInfo;
+			SDL_memset(&computeCreateInfo, 0, sizeof(computeCreateInfo));
+			computeCreateInfo.code = cs->spirvData;
+			computeCreateInfo.code_size = cs->spirvSize;
+			computeCreateInfo.entrypoint = cs->entryPoint;
+			computeCreateInfo.format = SDL_GPU_SHADERFORMAT_SPIRV;
+			computeCreateInfo.num_samplers = cs->samplerCount;
+			computeCreateInfo.num_readonly_storage_textures =
+				cs->readonlyStorageTextureCount;
+			computeCreateInfo.num_readonly_storage_buffers =
+				cs->readonlyStorageBufferCount;
+			computeCreateInfo.num_readwrite_storage_textures =
+				cs->readwriteStorageTextureCount;
+			computeCreateInfo.num_readwrite_storage_buffers =
+				cs->readwriteStorageBufferCount;
+			computeCreateInfo.num_uniform_buffers = cs->uniformBufferCount;
+			/* SDL requires the thread counts to match [numthreads(...)] */
+			computeCreateInfo.threadcount_x = cs->threadCountX;
+			computeCreateInfo.threadcount_y = cs->threadCountY;
+			computeCreateInfo.threadcount_z = cs->threadCountZ;
+			result->computePipelines[i] = SDL_CreateGPUComputePipeline(
+				renderer->device, &computeCreateInfo);
+
+			if (result->computePipelines[i] == NULL)
+			{
+				FNA3D_LogError(
+					"Failed to create compute pipeline: %s",
+					SDL_GetError()
+				);
+			}
 		}
 	}
 
@@ -4239,6 +4440,18 @@ static void SDLGPU_AddDisposeEffect(
 			}
 		}
 		SDL_free(gpuEffect->pixelShaders);
+	}
+	if (gpuEffect->computePipelines != NULL)
+	{
+		for (i = 0; i < gpuEffect->effectData->passCount; i++)
+		{
+			if (gpuEffect->computePipelines[i] != NULL)
+			{
+				SDL_ReleaseGPUComputePipeline(renderer->device,
+					gpuEffect->computePipelines[i]);
+			}
+		}
+		SDL_free(gpuEffect->computePipelines);
 	}
 
 	if (gpuEffect->uniformData != NULL)

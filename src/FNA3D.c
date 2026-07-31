@@ -1199,6 +1199,48 @@ void FNA3D_SetVertexStorageBuffers(
 	);
 }
 
+void FNA3D_SetComputeStorageBuffers(
+	FNA3D_Device *device,
+	FNA3D_Buffer **buffers,
+	int32_t firstSlot,
+	int32_t numBuffers,
+	uint8_t writable
+) {
+	if (device == NULL)
+	{
+		return;
+	}
+	device->SetComputeStorageBuffers(
+		device->driverData,
+		buffers,
+		firstSlot,
+		numBuffers,
+		writable
+	);
+}
+
+void FNA3D_DispatchCompute(
+	FNA3D_Device *device,
+	FNA3D_Effect *effect,
+	uint32_t pass,
+	uint32_t threadGroupCountX,
+	uint32_t threadGroupCountY,
+	uint32_t threadGroupCountZ
+) {
+	if (device == NULL || effect == NULL)
+	{
+		return;
+	}
+	device->DispatchCompute(
+		device->driverData,
+		effect,
+		pass,
+		threadGroupCountX,
+		threadGroupCountY,
+		threadGroupCountZ
+	);
+}
+
 /* Effects */
 
 uint8_t FNA3D_CreateEffect(
