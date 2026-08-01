@@ -228,6 +228,23 @@ uint8_t FNA3D_LoadEffect(
 			param->bufferOffset = param->registerIndex * 16;
 			SDL_memcpy(&param->currentValue, &param->defaultValue, 64);
 		}
+
+		/* Stale-FEB guard: the param region must be fully consumed.
+		 * If feb_builder changed the entry size (e.g. 88->84 bytes)
+		 * but this FEB was not rebuilt, the cursor will not land on
+		 * the technique section boundary. */
+		if (paramReadOff != techniqueOffset - paramOffset)
+		{
+			FNA3D_LogError(
+				"stale FEB: param region size mismatch "
+				"(read %u, expect %u) - rebuild with current feb_builder",
+				paramReadOff,
+				techniqueOffset - paramOffset
+			);
+			SDL_free(effect->ownedData);
+			SDL_free(effect);
+			return 0;
+		}
 	}
 
 	/* Parse techniques */
@@ -294,6 +311,24 @@ uint8_t FNA3D_LoadEffect(
 		shader->entryPoint = ResolveString(stringTable, entryOffset, stringTableSize);
 		shader->spirvData = spirvData + sOffset;
 		shader->spirvSize = sSize;
+
+		/* Validate SPIR-V magic to catch truncated/corrupted blobs */
+		if (sSize >= 4)
+		{
+			uint32_t spirvMagic;
+			SDL_memcpy(&spirvMagic, shader->spirvData, 4);
+			if (spirvMagic != 0x07230203)
+			{
+				FNA3D_LogError(
+					"FEB: shader %u has invalid SPIR-V magic 0x%08X",
+					i,
+					spirvMagic
+				);
+				SDL_free(effect->ownedData);
+				SDL_free(effect);
+				return 0;
+			}
+		}
 	}
 
 	/* Allocate state changes buffer (worst-case size) */
